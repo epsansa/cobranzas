@@ -1751,8 +1751,8 @@ function importarArchivo(e){
           <strong>${nuevos.length} clientes encontrados</strong> para importar
         </div>
         <div class="btn-row">
-          <button class="btn btn-dark" onclick='confirmarImport(${JSON.stringify(nuevos).replace(/'/g,"&#39;")})'>Agregar a base existente</button>
-          <button class="btn btn-red" onclick='confirmarReemplazar(${JSON.stringify(nuevos).replace(/'/g,"&#39;")})'>Reemplazar todo</button>
+          <button class="btn btn-dark" onclick="confirmarImport()">Agregar a base existente</button>
+          <button class="btn btn-red" onclick="confirmarReemplazar()">Reemplazar todo</button>
         </div>`;
     } catch(err){
       document.getElementById('imp-preview').innerHTML=`<div style="color:red;font-size:12px">Error: ${err.message}</div>`;
@@ -1786,20 +1786,25 @@ function extraerDatosImport(n){
   });
 }
 
-function confirmarImport(n){
+function confirmarImport(){
+  const n=window._importTemp||[];
+  if(!n.length){alert('No hay datos para importar');return;}
   DB.clientes=[...DB.clientes,...n];
   extraerDatosImport(n);
   saveDB();renderLista();
-  document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ ${n.length} clientes importados</strong><br><span style="font-size:11px">Entidades: ${DB.entidades.join(', ')||'—'} &nbsp;·&nbsp; Carteras: ${DB.carteras.join(', ')||'—'} &nbsp;·&nbsp; Comercios detectados: ${DB.comercios.length}</span></div>`;
-}
-function confirmarReemplazar(n){
-  if(!confirm('¿Reemplazar toda la base de datos?'))return;
+  document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ ${n.length} clientes importados</strong></div>`;
+  window._importTemp=null;}
+
+  function confirmarReemplazar(){
+  const n=window._importTemp||[];
+  if(!n.length){alert('No hay datos para importar');return;}
+  if(!confirm('¿Reemplazar toda la base con '+n.length+' clientes?'))return;
   DB.clientes=n;
   DB.entidades=[];DB.carteras=[];DB.comercios=[];
   extraerDatosImport(n);
   saveDB();renderLista();
-  document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ Base reemplazada con ${n.length} clientes</strong><br><span style="font-size:11px">Entidades: ${DB.entidades.join(', ')||'—'} &nbsp;·&nbsp; Carteras: ${DB.carteras.join(', ')||'—'} &nbsp;·&nbsp; Comercios detectados: ${DB.comercios.length}</span></div>`;
-}
+  document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ Base reemplazada con ${n.length} clientes</strong></div>`;
+  window._importTemp=null;}
 
 function renderExportar(){
   const el=document.getElementById('herrContent');
