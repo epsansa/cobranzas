@@ -1806,6 +1806,18 @@ function confirmarImport(){
   document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ Base reemplazada con ${n.length} clientes</strong></div>`;
   window._importTemp=null;}
 
+  function confirmarReemplazar(){
+  const n=window._importTemp||[];
+  if(!n.length){alert('No hay datos para importar');return;}
+  if(!confirm('¿Reemplazar toda la base con '+n.length+' clientes?'))return;
+  DB.clientes=n;
+  DB.entidades=[];DB.carteras=[];DB.comercios=[];
+  extraerDatosImport(n);
+  saveDB();renderLista();
+  document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ Base reemplazada con ${n.length} clientes</strong></div>`;
+  window._importTemp=null;
+}
+
 function renderExportar(){
   const el=document.getElementById('herrContent');
   // Comercios unicos de creditos + tabla comercios
