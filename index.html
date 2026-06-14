@@ -1705,7 +1705,7 @@ function importarArchivo(e){
           rows.push(obj);
         }
       } else {
-        const wb=XLSX.read(ev.target.result,{type:'binary'});
+        const wb=XLSX.read(ev.target.result,{type:'binary',cellDates:true,raw:false});
         const ws=wb.Sheets[wb.SheetNames[0]];
         const data=XLSX.utils.sheet_to_json(ws,{raw:false});
         rows=data.map(r=>{const obj={};Object.keys(r).forEach(k=>obj[k.toLowerCase().trim().replace(/[^a-z]/g,'')]=String(r[k]||'').trim());return obj;});
@@ -1745,7 +1745,8 @@ function importarArchivo(e){
           });
         }
       });
-      const nuevos=Object.values(mapa);
+      window._importTemp=Object.values(mapa);
+const nuevos=window._importTemp;
       document.getElementById('imp-preview').innerHTML=`
         <div style="background:#EAF3DE;border-radius:8px;padding:12px;margin-bottom:10px">
           <strong>${nuevos.length} clientes encontrados</strong> para importar
@@ -1795,11 +1796,10 @@ function confirmarImport(){
   document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ ${n.length} clientes importados</strong></div>`;
   window._importTemp=null;}
 
-  function confirmarReemplazar(){
+  function confirmarImport(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
-  if(!confirm('¿Reemplazar toda la base con '+n.length+' clientes?'))return;
-  DB.clientes=n;
+  DB.clientes=[...DB.clientes,...n];
   DB.entidades=[];DB.carteras=[];DB.comercios=[];
   extraerDatosImport(n);
   saveDB();renderLista();
