@@ -3,21 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgNjgwIj48Y2lyY2xlIGN4PSIzNDAiIGN5PSIzNDAiIHI9IjMxMCIgZmlsbD0iIzFhM2E2YiIvPjx0ZXh0IHg9IjM0MCIgeT0iNDIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjMyMCIgZm9udC1mYW1pbHk9IkFwcGxlIENvbG9yIEVtb2ppLFNlZ29lIFVJIEVtb2ppLE5vdG8gQ29sb3IgRW1vamksc2Fucy1zZXJpZiI+JiM5ODc4OyYjNjUwMzk7PC90ZXh0Pjwvc3ZnPg==">
-<link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgNjgwIj48Y2lyY2xlIGN4PSIzNDAiIGN5PSIzNDAiIHI9IjMxMCIgZmlsbD0iIzFhM2E2YiIvPjx0ZXh0IHg9IjM0MCIgeT0iNDIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjMyMCIgZm9udC1mYW1pbHk9IkFwcGxlIENvbG9yIEVtb2ppLFNlZ29lIFVJIEVtb2ppLE5vdG8gQ29sb3IgRW1vamksc2Fucy1zZXJpZiI+JiM5ODc4OyYjNjUwMzk7PC90ZXh0Pjwvc3ZnPg==">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Sistema de Cobranzas">
-<meta name="application-name" content="Sistema de Cobranzas">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sistema Collector — EPSAN</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script type="module">
-// ═══════════════════════════════════════
-// FIREBASE — configuración y sincronización
-// ═══════════════════════════════════════
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcOR-D4SKD7kA-VNcnXTvzw4ajpukXPFU",
@@ -30,197 +24,178 @@ const firebaseConfig = {
 
 const fbApp = initializeApp(firebaseConfig);
 const db_fs = getFirestore(fbApp);
-const DB_REF = doc(db_fs, "sistema", "base");
+const CONFIG_REF = doc(db_fs, "sistema", "config");
+const CLIENTES_COL = collection(db_fs, "clientes");
 
-// Estado de conexión
 window._fbConnected = false;
 window._fbSaving = false;
 window._fbLastSave = null;
 
-// ── GUARDAR en Firestore (debounce 800ms para no saturar)
-let _saveTimer = null;
-window.saveDB = function(){
-  // Backup local silencioso
+function actualizarIndicador(estado, extra){
+  const el = document.getElementById('fb-status');
+  if(!el) return;
+  if(estado==='conectando') el.innerHTML='<span style="color:#f5c97a">&#9203; Conectando...</span>';
+  else if(estado==='error') el.innerHTML='<span style="color:#ff8888">&#9888; Sin nube</span>';
+  else if(estado==='guardando') el.innerHTML='<span style="color:#7ab8f5">&#128190; Guardando'+(extra?' '+extra:'')+'...</span>';
+  else { const h=window._fbLastSave?window._fbLastSave.toTimeString().slice(0,5):''; el.innerHTML='<span style="color:#90ee90">&#9729; Conectado'+(h?' &middot; '+h:'')+'</span>'; }
+  window._fbActualizarIndicador = actualizarIndicador;
+}
+function mostrarError(msg){ const el=document.getElementById('fb-status'); if(el) el.innerHTML='<span style="color:#ff8888" title="'+msg+'">&#9888; Error</span>'; }
+
+let _saveTimer=null;
+window.saveDB = function(clienteModificado){
   try {
     localStorage.setItem('epsan_v3', JSON.stringify(window.DB));
-    const hoy = new Date().toISOString().slice(0,10);
-    const bkKey = 'epsan_bk_' + hoy;
-    if(!localStorage.getItem(bkKey)){
-      localStorage.setItem(bkKey, JSON.stringify(window.DB));
-      const bkKeys = Object.keys(localStorage).filter(k=>k.startsWith('epsan_bk_')).sort();
-      while(bkKeys.length > 3) localStorage.removeItem(bkKeys.shift());
-    }
+    const hoy=new Date().toISOString().slice(0,10);
+    const bkKey='epsan_bk_'+hoy;
+    if(!localStorage.getItem(bkKey)){ localStorage.setItem(bkKey,JSON.stringify(window.DB)); const bkKeys=Object.keys(localStorage).filter(k=>k.startsWith('epsan_bk_')).sort(); while(bkKeys.length>3) localStorage.removeItem(bkKeys.shift()); }
   } catch(e){}
-
-  // Guardar en Firestore con debounce
+  window._fbSaving=true; actualizarIndicador('guardando');
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async function(){
-    window._fbSaving = true;
-    actualizarIndicador();
+  _saveTimer=setTimeout(async function(){
     try {
-      await setDoc(DB_REF, {
-        data: JSON.stringify(window.DB),
-        ts: serverTimestamp()
-      });
-      window._fbLastSave = new Date();
-    } catch(e){
-      console.error('Error guardando en Firestore:', e);
-      mostrarError('Error al guardar en la nube: ' + e.message);
-    }
-    window._fbSaving = false;
-    actualizarIndicador();
-  }, 800);
+      await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
+      if(clienteModificado && clienteModificado.id){
+        await setDoc(doc(db_fs,'clientes',clienteModificado.id),{data:JSON.stringify(clienteModificado),ts:serverTimestamp()});
+      }
+      window._fbLastSave=new Date();
+    } catch(e){ console.error('Error saveDB:',e); mostrarError('Error al guardar: '+e.message); }
+    window._fbSaving=false; actualizarIndicador('ok');
+  },600);
 };
 
-// ── CARGAR desde Firestore y escuchar cambios en tiempo real
+window.saveDBCliente = function(cliente){ window.saveDB(cliente); };
+window.saveDBConfig  = function(){ window.saveDB(null); };
+
+window.deleteClienteDB = async function(id){
+  window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
+  try { await deleteDoc(doc(db_fs,'clientes',id)); } catch(e){}
+  try { localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); } catch(e){}
+};
+
+window.importarMasivo = async function(clientes, reemplazar){
+  actualizarIndicador('guardando');
+  window._fbSaving=true;
+  try {
+    if(reemplazar){
+      const snap=await getDocs(CLIENTES_COL);
+      const BSIZ=450;
+      const docs=snap.docs;
+      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); await b.commit(); }
+      window.DB.clientes=clientes;
+    } else {
+      window.DB.clientes=[...window.DB.clientes,...clientes];
+    }
+    const BSIZ=450;
+    for(let i=0;i<clientes.length;i+=BSIZ){
+      const b=writeBatch(db_fs);
+      clientes.slice(i,i+BSIZ).forEach(c=>{ if(!c.id) c.id='c_'+Date.now()+'_'+Math.random().toString(36).slice(2); b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()}); });
+      await b.commit();
+      actualizarIndicador('guardando',(i+Math.min(BSIZ,clientes.length-i))+'/'+clientes.length);
+    }
+    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
+    try { localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); } catch(e){}
+    window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
+    return true;
+  } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
+};
+
 async function iniciarFirebase(){
   actualizarIndicador('conectando');
   try {
-    // Carga inicial
-    const snap = await getDoc(DB_REF);
-    if(snap.exists() && snap.data().data){
-      const loaded = JSON.parse(snap.data().data);
-      Object.keys(window.DB).forEach(function(k){ delete window.DB[k]; });
-      Object.assign(window.DB, loaded);
-      if(!window.DB.comercios) window.DB.comercios = [];
-    } else {
-      // Primera vez: subir lo que hay en localStorage
-      const local = localStorage.getItem('epsan_v3');
-      if(local){ window.DB = JSON.parse(local); if(!window.DB.comercios) window.DB.comercios = []; }
-      await setDoc(DB_REF, { data: JSON.stringify(window.DB), ts: serverTimestamp() });
-    }
-
-    window._fbConnected = true;
-    actualizarIndicador('ok');
+    const cfgSnap=await getDoc(CONFIG_REF);
+    if(cfgSnap.exists()){ const cfg=cfgSnap.data(); window.DB.entidades=cfg.entidades||[]; window.DB.carteras=cfg.carteras||[]; window.DB.comercios=cfg.comercios||[]; }
+    const cliSnap=await getDocs(CLIENTES_COL);
+    window.DB.clientes=[];
+    cliSnap.forEach(d=>{ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+    if(!window.DB.comercios) window.DB.comercios=[];
+    window._fbConnected=true; actualizarIndicador('ok');
+    try { localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); } catch(e){}
     renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
-
-    // Escuchar cambios en tiempo real de otros usuarios
-    onSnapshot(DB_REF, function(snap){
-      if(!snap.exists()) return;
-      if(window._fbSaving) return; // ignorar si somos nosotros quien guarda
-      const remoto = JSON.parse(snap.data().data || '{}');
-      if(!remoto.clientes) return;
-      // Actualizar DB con datos remotos
-      // Mutar el objeto DB existente para que el alias local 'DB' también se actualice
-      Object.keys(window.DB).forEach(function(k){ delete window.DB[k]; });
-      Object.assign(window.DB, remoto);
-      if(!window.DB.comercios) window.DB.comercios = [];
-      renderLista();
-      // Si hay un cliente activo, refrescar su ficha
-      if(window.clienteActivo){
-        const actualizado = window.DB.clientes.find(c=>c.id===window.clienteActivo.id);
-        if(actualizado){ window.clienteActivo = actualizado; renderFicha(); }
-      }
-      actualizarIndicador('ok');
+    onSnapshot(CONFIG_REF,function(snap){ if(!snap.exists()) return; const cfg=snap.data(); window.DB.entidades=cfg.entidades||window.DB.entidades; window.DB.carteras=cfg.carteras||window.DB.carteras; window.DB.comercios=cfg.comercios||window.DB.comercios; });
+    onSnapshot(CLIENTES_COL,function(snap){
+      if(window._fbSaving) return;
+      snap.docChanges().forEach(change=>{
+        try {
+          const cliente=JSON.parse(change.doc.data().data);
+          if(change.type==='added'||change.type==='modified'){ const idx=window.DB.clientes.findIndex(c=>c.id===cliente.id); if(idx>=0) window.DB.clientes[idx]=cliente; else window.DB.clientes.push(cliente); if(window.clienteActivo&&window.clienteActivo.id===cliente.id){ window.clienteActivo=cliente; renderFicha(); } }
+          else if(change.type==='removed'){ window.DB.clientes=window.DB.clientes.filter(c=>c.id!==change.doc.id); }
+        } catch(e){}
+      });
+      renderLista(); actualizarIndicador('ok');
     });
-
   } catch(e){
-    console.error('Error conectando Firebase:', e);
-    window._fbConnected = false;
-    actualizarIndicador('error');
-    // Fallback a localStorage
-    const local = localStorage.getItem('epsan_v3');
-    if(local){ window.DB = JSON.parse(local); if(!window.DB.comercios) window.DB.comercios = []; }
-    renderLista();
-    if(window.clienteActivo) renderFicha(); else renderWelcome();
+    console.error('Error Firebase:',e); window._fbConnected=false; actualizarIndicador('error');
+    const local=localStorage.getItem('epsan_v3');
+    if(local){ try{ const d=JSON.parse(local); Object.assign(window.DB,d); if(!window.DB.comercios) window.DB.comercios=[]; }catch(e2){} }
+    renderLista(); if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
 }
-
-function actualizarIndicador(estado){
-  const el = document.getElementById('fb-status');
-  if(!el) return;
-  if(estado === 'conectando' || (!window._fbConnected && estado !== 'error')){
-    el.innerHTML = '<span style="color:#f5c97a">⏳ Conectando...</span>';
-  } else if(estado === 'error' || !window._fbConnected){
-    el.innerHTML = '<span style="color:#ff8888" title="Sin conexión a la nube — trabajando en modo local">⚠️ Sin nube</span>';
-  } else if(window._fbSaving){
-    el.innerHTML = '<span style="color:#7ab8f5">💾 Guardando...</span>';
-  } else {
-    const hora = window._fbLastSave ? window._fbLastSave.toTimeString().slice(0,5) : '';
-    el.innerHTML = '<span style="color:#90ee90" title="Conectado y sincronizado">☁️ Conectado' + (hora?' · '+hora:'') + '</span>';
-  }
-}
-
-function mostrarError(msg){
-  const el = document.getElementById('fb-status');
-  if(el) el.innerHTML = '<span style="color:#ff8888" title="'+msg+'">⚠️ Error</span>';
-}
-
-// Iniciar cuando el DOM esté listo
-if(document.readyState === 'loading'){
-  document.addEventListener('DOMContentLoaded', iniciarFirebase);
-} else {
-  iniciarFirebase();
-}
-
-// Exponer funciones necesarias globalmente
-window._fbActualizarIndicador = actualizarIndicador;
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',iniciarFirebase); else iniciarFirebase();
+window._fbActualizarIndicador=actualizarIndicador;
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:#edf2f9;color:#1a1a1a;font-size:13px;height:100vh;display:flex;flex-direction:column}
+body{font-family:Arial,sans-serif;background:#f0f0ee;color:#1a1a1a;font-size:13px;height:100vh;display:flex;flex-direction:column}
 a{color:inherit;text-decoration:none}
 
 /* TOP NAV */
-.topnav{background:linear-gradient(135deg,#1a3a6b 0%,#2557a7 100%);color:#fff;display:flex;align-items:center;height:44px;padding:0 16px;gap:4px;flex-shrink:0;border-bottom:2px solid #4a80d4}
-.topnav .logo{font-size:14px;font-weight:600;margin-right:16px;white-space:nowrap;letter-spacing:.02em}
+.topnav{background:#1a1a1a;color:#fff;display:flex;align-items:center;height:44px;padding:0 16px;gap:4px;flex-shrink:0}
+.topnav .logo{font-size:14px;font-weight:600;margin-right:16px;white-space:nowrap}
 .modnav{display:flex;gap:2px}
-.modnav .mb{padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;color:#a8c4e8;white-space:nowrap;transition:background .15s}
-.modnav .mb:hover{background:rgba(255,255,255,.12);color:#fff}
-.modnav .mb.active{background:#fff;color:#1a3a6b;font-weight:600}
+.modnav .mb{padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;color:#aaa;white-space:nowrap}
+.modnav .mb.active{background:#fff;color:#1a1a1a;font-weight:600}
 
 /* BODY LAYOUT */
 .body{display:flex;flex:1;overflow:hidden}
 
 /* LEFT PANEL */
-.leftpanel{width:260px;background:#fff;border-right:1px solid #c8d8ec;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
-.leftpanel .lp-header{padding:10px;border-bottom:2px solid #dce8f5;background:linear-gradient(180deg,#e8f2fc 0%,#f4f8fd 100%);flex-shrink:0}
-.search-box{width:100%;padding:7px 10px;border:1px solid #b8cfe8;border-radius:8px;font-size:12px;outline:none;background:#fff}
-.search-box:focus{border-color:#2557a7;box-shadow:0 0 0 2px rgba(37,87,167,.1)}
-.filter-sel{width:100%;padding:5px 8px;border:1px solid #c8d8ec;border-radius:6px;font-size:11px;outline:none;background:#fff;margin-top:5px}
+.leftpanel{width:260px;background:#fff;border-right:1px solid #e0e0dc;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
+.leftpanel .lp-header{padding:10px;border-bottom:1px solid #f0f0ec;flex-shrink:0}
+.search-box{width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:12px;outline:none}
+.filter-sel{width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;outline:none;background:#fff;margin-top:5px}
 .lp-list{flex:1;overflow-y:auto}
-.ci{padding:9px 11px;border-bottom:1px solid #eef3f8;cursor:pointer;transition:background .1s}
-.ci:hover{background:#f0f6fc}
-.ci.sel{background:#dceeff;border-left:3px solid #2557a7}
+.ci{padding:9px 11px;border-bottom:1px solid #f5f5f3;cursor:pointer;transition:background .1s}
+.ci:hover{background:#f8f8f6}
+.ci.sel{background:#EAF3DE;border-left:3px solid #4a8a1a}
 .ci .cn{font-weight:600;font-size:12px}
-.ci .cs{font-size:10px;color:#6a8aaa;margin-top:1px}
-.ci .ct{font-size:10px;color:#4a6a8a;margin-top:2px;background:#e8f2fc;padding:2px 5px;border-radius:3px}
+.ci .cs{font-size:10px;color:#888;margin-top:1px}
+.ci .ct{font-size:10px;color:#555;margin-top:2px;background:#f5f5f3;padding:2px 5px;border-radius:3px}
 .badge{display:inline-block;font-size:9px;padding:1px 5px;border-radius:99px;font-weight:600}
 .bp{background:#FAEEDA;color:#633806}
 .ba{background:#EAF3DE;color:#27500A}
-.bc{background:#dceeff;color:#1a3a6b}
+.bc{background:#e0f0ff;color:#1a4a8a}
 .bs{background:#f5e0ff;color:#5a1a8a}
-.lp-footer{padding:8px;border-top:2px solid #dce8f5;background:linear-gradient(180deg,#f4f8fd 0%,#e8f2fc 100%);display:flex;gap:5px;flex-shrink:0}
+.lp-footer{padding:8px;border-top:1px solid #f0f0ec;display:flex;gap:5px;flex-shrink:0}
 
 /* MAIN AREA */
-.mainarea{flex:1;overflow-y:auto;display:flex;flex-direction:column;background:#f4f7fb}
+.mainarea{flex:1;overflow-y:auto;display:flex;flex-direction:column}
 
 /* TABS */
-.tabbar{background:linear-gradient(180deg,#1e4a96 0%,#2557a7 100%);border-bottom:2px solid #1a3a6b;display:flex;padding:0 16px;flex-shrink:0;overflow-x:auto}
-.tabbar .tb{padding:10px 14px;cursor:pointer;font-size:12px;color:#a0c0e8;border-bottom:2px solid transparent;white-space:nowrap;transition:color .15s}
-.tabbar .tb:hover{color:#d0e8ff}
-.tabbar .tb.active{color:#fff;border-bottom-color:#7ab8f5;font-weight:600}
+.tabbar{background:#fff;border-bottom:1px solid #e0e0dc;display:flex;padding:0 16px;flex-shrink:0;overflow-x:auto}
+.tabbar .tb{padding:10px 14px;cursor:pointer;font-size:12px;color:#888;border-bottom:2px solid transparent;white-space:nowrap}
+.tabbar .tb.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
 .tabcontent{padding:16px;flex:1}
 
 /* CARDS */
-.card{background:#fff;border:1px solid #d0e0f0;border-radius:10px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(30,74,150,.06)}
-.card-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #e8f0f8}
-.card-title{font-size:10px;font-weight:700;color:#2557a7;text-transform:uppercase;letter-spacing:.08em}
+.card{background:#fff;border:1px solid #e0e0dc;border-radius:10px;padding:16px;margin-bottom:12px}
+.card-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.card-title{font-size:10px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
 .fl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.fld label{display:block;font-size:10px;color:#4a6a9a;margin-bottom:2px;font-weight:600}
+.fld label{display:block;font-size:10px;color:#888;margin-bottom:2px}
 .fld .v{font-size:13px;font-weight:500}
 .fld input,.fld select,.fld textarea{width:100%;padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;background:#fff;font-family:Arial}
 .fld textarea{resize:vertical;min-height:60px}
-.fld input:focus,.fld select:focus,.fld textarea:focus{border-color:#2557a7;box-shadow:0 0 0 2px rgba(37,87,167,.1)}
+.fld input:focus,.fld select:focus,.fld textarea:focus{border-color:#888}
 
 /* BUTTONS */
 .btn{padding:6px 13px;border-radius:7px;border:none;font-size:12px;cursor:pointer;font-family:Arial;white-space:nowrap}
-.btn-dark{background:linear-gradient(135deg,#1e4a96 0%,#2d63b8 100%);color:#fff;border:1px solid #1a3a6b}
-.btn-dark:hover{background:linear-gradient(135deg,#2557a7 0%,#3a78d0 100%)}
+.btn-dark{background:#1a1a1a;color:#fff}
+.btn-dark:hover{background:#333}
 .btn-green{background:#EAF3DE;color:#27500A;border:1px solid #C0DD97}
 .btn-green:hover{background:#d8ebc8}
 .btn-red{background:#FCEBEB;color:#791F1F;border:1px solid #f0b0b0}
@@ -232,11 +207,9 @@ a{color:inherit;text-decoration:none}
 
 /* TABLES */
 .tbl{width:100%;border-collapse:collapse;font-size:12px}
-.tbl th{text-align:left;padding:7px 9px;background:linear-gradient(180deg,#2d63b8 0%,#2557a7 100%);border-bottom:2px solid #1a3a6b;font-size:10px;color:#fff;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-.tbl td{padding:7px 9px;border-bottom:1px solid #e8f0f8}
-.tbl tbody tr:nth-child(even) td{background:#f4f8fd}
-.tbl tr:hover td{background:#dceeff!important;cursor:pointer}
-
+.tbl th{text-align:left;padding:7px 9px;background:#f5f5f3;border-bottom:1px solid #e0e0dc;font-size:10px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.tbl td{padding:7px 9px;border-bottom:1px solid #f0f0ec}
+.tbl tr:hover td{background:#f8f8f6;cursor:pointer}
 .tbl .num{text-align:right;font-weight:500}
 
 /* TRAMITES */
@@ -255,7 +228,7 @@ a{color:inherit;text-decoration:none}
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
 .modal{background:#fff;border-radius:12px;padding:22px;width:520px;max-width:96vw;max-height:90vh;overflow-y:auto}
-.modal h3{font-size:15px;margin-bottom:14px;color:#1a3a6b;padding-bottom:10px;border-bottom:2px solid #dce8f5}
+.modal h3{font-size:15px;margin-bottom:14px}
 
 /* STATS */
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
@@ -268,7 +241,7 @@ a{color:inherit;text-decoration:none}
 
 /* WELCOME */
 .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#aaa;gap:8px;padding:40px}
-.welcome h2{font-size:17px;color:#2557a7}
+.welcome h2{font-size:17px;color:#555}
 
 /* PLAN CUOTAS */
 .cuota-row-tbl{display:grid;grid-template-columns:40px 1fr 1fr 1fr 80px;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0ec;font-size:12px}
@@ -288,10 +261,7 @@ a{color:inherit;text-decoration:none}
 
 <!-- TOP NAV -->
 <div class="topnav">
-  <div class="logo">⚖️ Sistema de Cobranzas</div>
-  <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9">
-    <span style="color:#f5c97a">⏳ Conectando...</span>
-  </div>
+  <div class="logo">⚖️ EPSAN Collector</div>
   <div class="modnav">
     <div class="mb active" onclick="setMod('admin',this)">Administración</div>
     <div class="mb" onclick="setMod('consultas',this)">Consultas</div>
@@ -453,25 +423,14 @@ a{color:inherit;text-decoration:none}
 // ═══════════════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════════════
-var DB = {
+let DB = {
   clientes: [],
   entidades: ['NEACRED','CREDIL'],
-  carteras: ['Cartera A','Cartera B'],
-  comercios: []
+  carteras: ['Cartera A','Cartera B']
 };
-window.DB = DB;
 
-function loadDB(){
-  // La carga real la hace Firebase — esto es solo fallback local
-  const s=localStorage.getItem('epsan_v3');
-  if(s){ try{ DB=JSON.parse(s); if(!DB.comercios) DB.comercios=[]; }catch(e){} }
-}
-// saveDB es definido por el módulo Firebase — aquí solo fallback por si aún no cargó
-if(typeof saveDB === 'undefined'){
-  window.saveDB = function(){
-    try{ localStorage.setItem('epsan_v3',JSON.stringify(DB)); }catch(e){}
-  };
-}
+function loadDB(){ const s=localStorage.getItem('epsan_v3'); if(s) DB=JSON.parse(s); }
+function saveDB(){ localStorage.setItem('epsan_v3',JSON.stringify(DB)); }
 loadDB();
 
 let clienteActivo = null;
@@ -595,23 +554,20 @@ function renderTab(){
 
 // ── TAB AVANZADA ──
 function renderAvanzada(){
+  const c=clienteActivo;
+  const ents=DB.entidades.map(e=>`<option ${(c&&c.entidad===e)?'selected':''}>${e}</option>`).join('');
+  const cars=DB.carteras.map(x=>`<option ${(c&&c.cartera===x)?'selected':''}>${x}</option>`).join('');
   return `
   <div class="card">
     <div class="card-hdr"><div class="card-title">Filtros avanzados</div>
-      <button class="btn btn-outline btn-sm" onclick="abrirConfig()">&#9881; Config entidades</button>
+      <button class="btn btn-outline btn-sm" onclick="abrirConfig()">⚙️ Config entidades</button>
     </div>
     <div class="adv-filters">
       <div class="fld"><label>Entidad</label>
-        <select id="adv-ent" onchange="aplicarAvanzada()">
-          <option value="">Todas</option>
-          ${DB.entidades.map(e=>`<option>${e}</option>`).join('')}
-        </select>
+        <select id="adv-ent" onchange="aplicarAvanzada()"><option value="">Todas</option>${DB.entidades.map(e=>`<option>${e}</option>`).join('')}</select>
       </div>
       <div class="fld"><label>Cartera</label>
-        <select id="adv-car" onchange="aplicarAvanzada()">
-          <option value="">Todas</option>
-          ${DB.carteras.map(c=>`<option>${c}</option>`).join('')}
-        </select>
+        <select id="adv-car" onchange="aplicarAvanzada()"><option value="">Todas</option>${DB.carteras.map(x=>`<option>${x}</option>`).join('')}</select>
       </div>
       <div class="fld"><label>Estado</label>
         <select id="adv-est" onchange="aplicarAvanzada()">
@@ -634,27 +590,14 @@ function aplicarAvanzada(){
   });
   const el=document.getElementById('avanzada-resultado');
   if(!fil.length){el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Sin resultados</div>';return;}
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <span style="font-size:11px;color:#888">${fil.length} resultado/s</span>
-    <button class="btn btn-green btn-sm" onclick="exportarResultadoAvanzada('${ent}','${car}','${est}')">&#128229; Exportar Excel</button>
-  </div>
-  <table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th></tr></thead><tbody>`+
+  el.innerHTML=`<table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th></tr></thead><tbody>`+
     fil.map(c=>`<tr onclick="selCliente('${c.id}');setTabAdmin('datos')">
-      <td>${c.nombre||'\u2014'}</td><td>${c.dni||'\u2014'}</td>
-      <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado||'\u2014'}</span></td>
-      <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'\u2014'}</td>
-      <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'\u2014'}</td>
+      <td>${c.nombre||'—'}</td><td>${c.dni||'—'}</td>
+      <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado||'—'}</span></td>
+      <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'—'}</td>
+      <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'—'}</td>
       <td>${(c.creditos||[]).length}</td>
     </tr>`).join('')+'</tbody></table>';
-}
-
-function exportarResultadoAvanzada(ent, car, est){
-  const fil=DB.clientes.filter(c=>{
-    const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
-    const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
-    return enEnt && enCar && (!est||c.estado===est);
-  });
-  exportarExcelClientes(fil,'avanzada_filtro');
 }
 
 // ── TAB DATOS ──
@@ -831,7 +774,7 @@ function guardarObs(){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].obs=txt;
   clienteActivo=DB.clientes[idx];
-  saveDB();
+  saveDB(clienteActivo);
   const btn=event.target;
   btn.textContent='Guardado ✓';
   btn.classList.add('btn-green');
@@ -926,13 +869,13 @@ function guardarCliente(){
     DB.clientes.push(nuevo);
     clienteActivo=nuevo;
   }
-  saveDB();renderLista();renderFicha();cerrarModal('modalCli');
+  saveDB(clienteActivo);renderLista();renderFicha();cerrarModal('modalCli');
 }
 
 function eliminarCliente(){
   if(!confirm('¿Eliminar este cliente y todos sus datos?'))return;
-  DB.clientes=DB.clientes.filter(c=>c.id!==editandoCliId);
-  clienteActivo=null;saveDB();renderLista();renderWelcome();cerrarModal('modalCli');
+  window.deleteClienteDB(editandoCliId).then(()=>{ clienteActivo=null; renderLista(); renderWelcome(); });
+  cerrarModal('modalCli');
 }
 
 // ── TELÉFONOS / MAILS ──
@@ -940,37 +883,37 @@ function addTel(){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].telefonos.push('');
   clienteActivo=DB.clientes[idx];
-  saveDB();setTabAdmin('datos');
+  saveDB(clienteActivo);setTabAdmin('datos');
 }
 function delTel(i){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].telefonos.splice(i,1);
   clienteActivo=DB.clientes[idx];
-  saveDB();setTabAdmin('datos');
+  saveDB(clienteActivo);setTabAdmin('datos');
 }
 function editTel(i,v){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].telefonos[i]=v;
   clienteActivo=DB.clientes[idx];
-  saveDB();
+  saveDB(clienteActivo);
 }
 function addMail(){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].mails.push('');
   clienteActivo=DB.clientes[idx];
-  saveDB();setTabAdmin('datos');
+  saveDB(clienteActivo);setTabAdmin('datos');
 }
 function delMail(i){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].mails.splice(i,1);
   clienteActivo=DB.clientes[idx];
-  saveDB();setTabAdmin('datos');
+  saveDB(clienteActivo);setTabAdmin('datos');
 }
 function editMail(i,v){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].mails[i]=v;
   clienteActivo=DB.clientes[idx];
-  saveDB();
+  saveDB(clienteActivo);
 }
 
 // ── CRÉDITOS ──
@@ -1024,7 +967,7 @@ function guardarCredito(){
     DB.clientes[idx].creditos.push({...datos,plan:[]});
   }
   clienteActivo=DB.clientes[idx];
-  saveDB();cerrarModal('modalCred');setTabAdmin('cuenta');
+  saveDB(clienteActivo);cerrarModal('modalCred');setTabAdmin('cuenta');
 }
 
 function eliminarCredito(){
@@ -1032,7 +975,7 @@ function eliminarCredito(){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].creditos.splice(editandoCredIdx,1);
   clienteActivo=DB.clientes[idx];
-  saveDB();cerrarModal('modalCred');setTabAdmin('cuenta');
+  saveDB(clienteActivo);cerrarModal('modalCred');setTabAdmin('cuenta');
 }
 
 // ── PLAN PAGOS ──
@@ -1057,14 +1000,14 @@ function guardarPlan(){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].creditos[creditoActivoIdx].plan=plan;
   clienteActivo=DB.clientes[idx];
-  saveDB();cerrarModal('modalPlan');setTabAdmin('cuenta');
+  saveDB(clienteActivo);cerrarModal('modalPlan');setTabAdmin('cuenta');
 }
 
 function toggleCuota(ci,pi){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].creditos[ci].plan[pi].pagada=!DB.clientes[idx].creditos[ci].plan[pi].pagada;
   clienteActivo=DB.clientes[idx];
-  saveDB();setTabAdmin('cuenta');
+  saveDB(clienteActivo);setTabAdmin('cuenta');
 }
 
 // ── TRÁMITES ──
@@ -1099,7 +1042,7 @@ function guardarTramite(){
     DB.clientes[idx].telefonos.push(tel+' (tramite '+fechaHora.slice(0,10)+')');
   }
   clienteActivo=DB.clientes[idx];
-  saveDB();renderLista();cerrarModal('modalTr');setTabAdmin('tramites');
+  saveDB(clienteActivo);renderLista();cerrarModal('modalTr');setTabAdmin('tramites');
 }
 
 // ── CONFIG ENTIDADES ──
@@ -1137,47 +1080,25 @@ function agregarCartera(){
   saveDB();renderConfigListas();
 }
 function elimCartera(i){ DB.carteras.splice(i,1); saveDB();renderConfigListas(); }
+
 // ═══════════════════════════════════════════════════
 // CONSULTAS
 // ═══════════════════════════════════════════════════
 function renderConsultas(){
   document.getElementById('mainArea').innerHTML=`
-  <div class="tabbar" id="consultaTabbar">
+  <div class="tabbar">
     <div class="tb active" onclick="setTabConsulta('promesas',this)">Promesas registradas</div>
-    <div class="tb" onclick="setTabConsulta('contacto',this)">Ultimo contacto</div>
-    <div class="tb" onclick="setTabConsulta('comercios',this)">Comercios</div>
-    <div class="tb" onclick="setTabConsulta('clientes',this)">Clientes</div>
+    <div class="tb" onclick="setTabConsulta('contacto',this)">Último contacto</div>
   </div>
   <div class="tabcontent" id="consultaContent"></div>`;
   renderConsultaPromesas();
 }
 
 function setTabConsulta(tab, el){
-  const bar=document.getElementById('consultaTabbar');
-  if(bar) bar.querySelectorAll('.tb').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tabbar .tb').forEach(t=>t.classList.remove('active'));
   if(el) el.classList.add('active');
   if(tab==='promesas') renderConsultaPromesas();
-  else if(tab==='contacto') renderConsultaContacto();
-  else if(tab==='comercios') renderConsultaComercios();
-  else renderConsultaClientes();
-}
-
-// Helper: checkboxes de entidades/carteras para consultas
-// Helper: selects de entidades/carteras para consultas
-function selectEntCar(prefijo){
-  return `
-    <div class="fld"><label>Entidad</label>
-      <select id="${prefijo}-ent">
-        <option value="">Todas</option>
-        ${DB.entidades.map(e=>`<option>${e}</option>`).join('')}
-      </select>
-    </div>
-    <div class="fld"><label>Cartera</label>
-      <select id="${prefijo}-car">
-        <option value="">Todas</option>
-        ${DB.carteras.map(c=>`<option>${c}</option>`).join('')}
-      </select>
-    </div>`;
+  else renderConsultaContacto();
 }
 
 function renderConsultaPromesas(){
@@ -1186,7 +1107,8 @@ function renderConsultaPromesas(){
   <div class="card">
     <div class="card-title" style="margin-bottom:12px">Promesas de pago registradas</div>
     <div class="adv-filters">
-      ${selectEntCar('cp')}
+      <div class="fld"><label>Entidad</label><select id="cp-ent"><option value="">Todas</option>${DB.entidades.map(e=>`<option>${e}</option>`).join('')}</select></div>
+      <div class="fld"><label>Cartera</label><select id="cp-car"><option value="">Todas</option>${DB.carteras.map(c=>`<option>${c}</option>`).join('')}</select></div>
       <div class="fld"><label>Fecha desde</label><input type="date" id="cp-desde"></div>
       <div class="fld"><label>Fecha hasta</label><input type="date" id="cp-hasta"></div>
       <button class="btn btn-dark" onclick="filtrarPromesas()" style="margin-top:14px">Buscar</button>
@@ -1209,26 +1131,14 @@ function filtrarPromesas(){
       const f=t.fechaHora.slice(0,10);
       if(desde&&f<desde) return;
       if(hasta&&f>hasta) return;
-      rows.push({cliente:c.nombre,dni:c.dni,fecha:t.fechaHora,nota:t.nota,entidad:(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'\u2014',cartera:(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'\u2014'});
+      rows.push({cliente:c.nombre,dni:c.dni,fecha:t.fechaHora,nota:t.nota});
     });
   });
   const el=document.getElementById('res-promesas');
   if(!rows.length){el.innerHTML='<div style="color:#aaa;font-size:12px;margin-top:10px">Sin resultados</div>';return;}
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">
-    <span style="font-size:11px;color:#888">${rows.length} promesa/s encontrada/s</span>
-    <button class="btn btn-green btn-sm" onclick="exportarPromesas()">&#128229; Exportar Excel</button>
-  </div>
-  <table class="tbl"><thead><tr><th>Cliente</th><th>DNI</th><th>Entidad</th><th>Cartera</th><th>Fecha</th><th>Detalle</th></tr></thead><tbody>`+
-  rows.map(r=>`<tr><td>${r.cliente}</td><td>${r.dni}</td><td>${r.entidad}</td><td>${r.cartera}</td><td>${r.fecha}</td><td>${r.nota}</td></tr>`).join('')+'</tbody></table>';
-  window._lastPromesas=rows;
-}
-
-function exportarPromesas(){
-  const rows=(window._lastPromesas||[]).map(r=>({Cliente:r.cliente,DNI:r.dni,Entidad:r.entidad,Cartera:r.cartera,Fecha:r.fecha,Detalle:r.nota}));
-  const ws=XLSX.utils.json_to_sheet(rows);
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Promesas');
-  XLSX.writeFile(wb,'promesas_pago.xlsx');
+  el.innerHTML=`<div style="font-size:11px;color:#888;margin:8px 0">${rows.length} promesa/s encontrada/s</div>
+  <table class="tbl"><thead><tr><th>Cliente</th><th>DNI</th><th>Fecha</th><th>Detalle</th></tr></thead><tbody>`+
+  rows.map(r=>`<tr><td>${r.cliente}</td><td>${r.dni}</td><td>${r.fecha}</td><td>${r.nota}</td></tr>`).join('')+'</tbody></table>';
 }
 
 function renderConsultaContacto(){
@@ -1237,7 +1147,8 @@ function renderConsultaContacto(){
   <div class="card">
     <div class="card-title" style="margin-bottom:12px">Consulta por último contacto</div>
     <div class="adv-filters">
-      ${selectEntCar('cc')}
+      <div class="fld"><label>Entidad</label><select id="cc-ent"><option value="">Todas</option>${DB.entidades.map(e=>`<option>${e}</option>`).join('')}</select></div>
+      <div class="fld"><label>Cartera</label><select id="cc-car"><option value="">Todas</option>${DB.carteras.map(c=>`<option>${c}</option>`).join('')}</select></div>
       <div class="fld"><label>Fecha desde</label><input type="date" id="cc-desde"></div>
       <div class="fld"><label>Fecha hasta</label><input type="date" id="cc-hasta"></div>
       <div class="fld"><label>Estado</label><select id="cc-est"><option value="">Todos</option><option>Pendiente</option><option>En acuerdo</option><option>Cancelado</option><option>Sin contacto</option></select></div>
@@ -1266,381 +1177,63 @@ function filtrarContacto(){
   });
   const el=document.getElementById('res-contacto');
   if(!rows.length){el.innerHTML='<div style="color:#aaa;font-size:12px;margin-top:10px">Sin resultados</div>';return;}
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">
-    <span style="font-size:11px;color:#888">${rows.length} resultado/s</span>
-    <button class="btn btn-green btn-sm" onclick="exportarContacto()">&#128229; Exportar Excel</button>
-  </div>
-  <table class="tbl"><thead><tr><th>Cliente</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Último contacto</th><th>Tipo</th></tr></thead><tbody>`+
+  el.innerHTML=`<div style="font-size:11px;color:#888;margin:8px 0">${rows.length} resultado/s</div>
+  <table class="tbl"><thead><tr><th>Cliente</th><th>DNI</th><th>Estado</th><th>Último contacto</th><th>Tipo</th></tr></thead><tbody>`+
   rows.map(c=>{
     const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
-    const entidad=(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'\u2014';
-    const cartera=(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'\u2014';
     return `<tr onclick="selCliente('${c.id}');setMod('admin',document.querySelectorAll('.mb')[0]);setTabAdmin('tramites')">
       <td>${c.nombre}</td><td>${c.dni}</td>
       <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado}</span></td>
-      <td>${entidad}</td><td>${cartera}</td>
-      <td>${ult?ult.fechaHora:'\u2014'}</td><td>${ult?ult.tipo:'\u2014'}</td>
+      <td>${ult?ult.fechaHora:'—'}</td><td>${ult?ult.tipo:'—'}</td>
     </tr>`;
   }).join('')+'</tbody></table>';
-  window._lastContacto=rows;
 }
-
-function exportarContacto(){
-  const rows=(window._lastContacto||[]).map(c=>{
-    const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
-    return {Cliente:c.nombre,DNI:c.dni,Estado:c.estado,Entidad:(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad,Cartera:(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera,UltimoContacto:ult?ult.fechaHora:'\u2014',Tipo:ult?ult.tipo:'\u2014'};
-  });
-  const ws=XLSX.utils.json_to_sheet(rows);
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Contacto');
-  XLSX.writeFile(wb,'ultimo_contacto.xlsx');
-}
-
-function renderConsultaComercios(){
-  const el=document.getElementById('consultaContent');
-  el.innerHTML=`
-  <div class="card">
-    <div class="card-hdr">
-      <div class="card-title">Comercios</div>
-      <button class="btn btn-dark btn-sm" onclick="abrirNuevoComercio()">+ Nuevo comercio</button>
-    </div>
-    <div class="adv-filters" style="margin-bottom:10px">
-      <div class="fld"><label>Buscar</label><input id="com-srch" placeholder="Nombre, localidad, producto..." oninput="renderListaComercios()" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;min-width:220px"></div>
-      <button class="btn btn-green btn-sm" onclick="exportarComercios()" style="margin-top:14px">&#128229; Exportar Excel</button>
-    </div>
-    <div id="res-comercios"></div>
-  </div>`;
-  renderListaComercios();
-}
-
-function renderListaComercios(){
-  const q=(document.getElementById('com-srch')||{value:''}).value.toLowerCase();
-  const coms=(DB.comercios||[]).filter(function(c){
-    if(!q) return true;
-    return (c.nombre+c.producto+c.direccion+c.localidad+c.telefono+c.mail+c.datos).toLowerCase().includes(q);
-  });
-  const el=document.getElementById('res-comercios');
-  if(!coms.length){el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px">Sin comercios cargados</div>';return;}
-  let rows='';
-  coms.forEach(function(c,i){
-    rows+='<tr>'+
-      '<td style="user-select:text;cursor:text">'+(c.nombre||'—')+'</td>'+
-      '<td style="user-select:text;cursor:text">'+(c.producto||'—')+'</td>'+
-      '<td style="user-select:text;cursor:text">'+(c.direccion||'—')+'</td>'+
-      '<td style="user-select:text;cursor:text">'+(c.localidad||'—')+'</td>'+
-      '<td style="user-select:text;cursor:text">'+(c.telefono||'—')+'</td>'+
-      '<td style="user-select:text;cursor:text">'+(c.mail||'—')+'</td>'+
-      '<td style="user-select:text;cursor:text">'+(c.datos||'—')+'</td>'+
-      '<td style="white-space:nowrap">'+
-        '<button class="btn btn-outline btn-sm" onclick="abrirEditarComercio('+i+')" title="Editar">&#9998;</button>'+
-        ' <button class="btn btn-outline btn-sm copiar-btn" data-idx="'+i+'" title="Copiar datos">&#128203;</button>'+
-      '</td>'+
-    '</tr>';
-  });
-  el.innerHTML=
-    '<div style="font-size:11px;color:#888;margin-bottom:8px">'+coms.length+' comercio/s &nbsp;&middot;&nbsp; <em>Click en celda para seleccionar y copiar</em></div>'+
-    '<table class="tbl" style="user-select:text"><thead><tr>'+
-      '<th>Nombre</th><th>Producto</th><th>Dirección</th><th>Localidad</th><th>Teléfono</th><th>Mail</th><th>Datos adicionales</th><th></th>'+
-    '</tr></thead><tbody>'+rows+'</tbody></table>';
-  // Attach copy handlers after render (avoids onclick quoting issues)
-  el.querySelectorAll('.copiar-btn').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      const idx=parseInt(btn.getAttribute('data-idx'));
-      const c=(DB.comercios||[])[idx];
-      if(!c) return;
-      const txt=[c.nombre,c.producto,c.direccion,c.localidad,c.telefono,c.mail,c.datos].filter(Boolean).join(' | ');
-      navigator.clipboard.writeText(txt).then(function(){
-        const orig=btn.innerHTML;
-        btn.innerHTML='&#10003;';
-        btn.style.color='green';
-        setTimeout(function(){btn.innerHTML=orig;btn.style.color='';},1500);
-      }).catch(function(){alert('No se pudo copiar al portapapeles');});
-    });
-  });
-}
-
-function abrirNuevoComercio(){
-  abrirModalComercio(null);
-}
-function abrirEditarComercio(i){
-  abrirModalComercio(i);
-}
-
-function abrirModalComercio(idx){
-  const c=idx!==null&&idx!==undefined?(DB.comercios||[])[idx]:null;
-  const html=`
-  <div class="modal-overlay open" id="modalComercio" onclick="if(event.target===this)this.remove()">
-  <div class="modal">
-    <h3>${c?'Editar comercio':'Nuevo comercio'}</h3>
-    <div class="g2" style="gap:10px;margin-bottom:10px">
-      <div class="fld"><label>Nombre comercio *</label><input id="com-nombre" value="${c?c.nombre:''}" placeholder="Optica Sur"></div>
-      <div class="fld"><label>Producto</label><input id="com-producto" value="${c?c.producto:''}" placeholder="Anteojos, lentes..."></div>
-      <div class="fld"><label>Dirección</label><input id="com-dir" value="${c?c.direccion:''}" placeholder="Av. Corrientes 1234"></div>
-      <div class="fld"><label>Localidad</label><input id="com-loc" value="${c?c.localidad:''}" placeholder="Buenos Aires"></div>
-      <div class="fld"><label>Teléfono</label><input id="com-tel" value="${c?c.telefono:''}" placeholder="11 1234-5678"></div>
-      <div class="fld"><label>Mail</label><input id="com-mail" value="${c?c.mail:''}" placeholder="contacto@..."></div>
-    </div>
-    <div class="fld" style="margin-bottom:10px"><label>Datos adicionales</label><textarea id="com-datos" style="width:100%;padding:7px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;min-height:60px;resize:vertical">${c?c.datos:''}</textarea></div>
-    <div class="btn-row">
-      <button class="btn btn-dark" onclick="guardarComercio(${idx!==null&&idx!==undefined?idx:'null'})">Guardar</button>
-      <button class="btn btn-outline" onclick="document.getElementById('modalComercio').remove()">Cancelar</button>
-      ${c?`<button class="btn btn-red" style="margin-left:auto" onclick="eliminarComercio(${idx})">Eliminar</button>`:''}
-    </div>
-  </div>
-  </div>`;
-  document.body.insertAdjacentHTML('beforeend',html);
-}
-
-function guardarComercio(idx){
-  if(!DB.comercios) DB.comercios=[];
-  const datos={
-    nombre:document.getElementById('com-nombre').value.trim(),
-    producto:document.getElementById('com-producto').value.trim(),
-    direccion:document.getElementById('com-dir').value.trim(),
-    localidad:document.getElementById('com-loc').value.trim(),
-    telefono:document.getElementById('com-tel').value.trim(),
-    mail:document.getElementById('com-mail').value.trim(),
-    datos:document.getElementById('com-datos').value.trim(),
-  };
-  if(!datos.nombre){alert('El nombre del comercio es obligatorio');return;}
-  if(idx===null||idx===undefined||isNaN(idx)){
-    DB.comercios.push(datos);
-  } else {
-    DB.comercios[idx]={...DB.comercios[idx],...datos};
-  }
-  saveDB();
-  document.getElementById('modalComercio').remove();
-  renderConsultaComercios();
-}
-
-function eliminarComercio(idx){
-  if(!confirm('Eliminar este comercio?')) return;
-  DB.comercios.splice(idx,1);
-  saveDB();
-  document.getElementById('modalComercio').remove();
-  renderConsultaComercios();
-}
-
-function exportarComercios(){
-  const q=(document.getElementById('com-srch')||{value:''}).value.toLowerCase();
-  const coms=(DB.comercios||[]).filter(c=>{
-    if(!q) return true;
-    return (c.nombre+c.producto+c.direccion+c.localidad+c.telefono+c.mail+c.datos).toLowerCase().includes(q);
-  });
-  const rows=coms.map(c=>({Nombre:c.nombre,Producto:c.producto,Direccion:c.direccion,Localidad:c.localidad,Telefono:c.telefono,Mail:c.mail,DatosAdicionales:c.datos}));
-  const ws=XLSX.utils.json_to_sheet(rows);
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Comercios');
-  XLSX.writeFile(wb,'comercios.xlsx');
-}
-
-
-function renderConsultaClientes(){
-  const el=document.getElementById('consultaContent');
-  const ents=DB.entidades.map(e=>'<option>'+e+'</option>').join('');
-  const cars=DB.carteras.map(c=>'<option>'+c+'</option>').join('');
-  const coms=[...new Set(DB.clientes.flatMap(function(c){return (c.creditos||[]).map(function(cr){return cr.comercio||'';});}).filter(Boolean))].sort();
-  const comsOpts=coms.map(c=>'<option>'+c+'</option>').join('');
-  el.innerHTML=
-    '<div class="card">'+
-      '<div class="card-hdr">'+
-        '<div class="card-title">Consulta de clientes</div>'+
-        '<button class="btn btn-green btn-sm" onclick="exportarConsultaClientes()">&#128229; Exportar Excel</button>'+
-      '</div>'+
-      '<div class="adv-filters">'+
-        '<div class="fld"><label>Entidad</label>'+
-          '<select id="qcl-ent" onchange="filtrarConsultaClientes()">'+
-            '<option value="">Todas</option>'+ents+
-          '</select>'+
-        '</div>'+
-        '<div class="fld"><label>Cartera</label>'+
-          '<select id="qcl-car" onchange="filtrarConsultaClientes()">'+
-            '<option value="">Todas</option>'+cars+
-          '</select>'+
-        '</div>'+
-        '<div class="fld"><label>Comercio</label>'+
-          '<select id="qcl-com" onchange="filtrarConsultaClientes()">'+
-            '<option value="">Todos</option>'+comsOpts+
-          '</select>'+
-        '</div>'+
-        '<div class="fld"><label>Estado</label>'+
-          '<select id="qcl-est" onchange="filtrarConsultaClientes()">'+
-            '<option value="">Todos</option>'+
-            '<option>Pendiente</option>'+
-            '<option>En acuerdo</option>'+
-            '<option>Cancelado</option>'+
-            '<option>Sin contacto</option>'+
-          '</select>'+
-        '</div>'+
-        '<div class="fld"><label>Fecha mora desde</label>'+
-          '<input type="date" id="qcl-fmd" onchange="filtrarConsultaClientes()">'+
-        '</div>'+
-        '<div class="fld"><label>Fecha mora hasta</label>'+
-          '<input type="date" id="qcl-fmh" onchange="filtrarConsultaClientes()">'+
-        '</div>'+
-      '</div>'+
-      '<div id="qcl-info" style="font-size:11px;color:#888;margin-bottom:8px"></div>'+
-      '<div id="qcl-result"></div>'+
-    '</div>';
-  filtrarConsultaClientes();
-}
-
-function filtrarConsultaClientes(){
-  const ent=(document.getElementById('qcl-ent')||{value:''}).value;
-  const car=(document.getElementById('qcl-car')||{value:''}).value;
-  const com=(document.getElementById('qcl-com')||{value:''}).value;
-  const est=(document.getElementById('qcl-est')||{value:''}).value;
-  const fmd=(document.getElementById('qcl-fmd')||{value:''}).value;
-  const fmh=(document.getElementById('qcl-fmh')||{value:''}).value;
-
-  const fil=DB.clientes.filter(function(c){
-    if(est && c.estado!==est) return false;
-    const creds=(c.creditos||[]);
-    if(ent||car||com||fmd||fmh){
-      return creds.some(function(cr){
-        if(ent && (cr.entidad||c.entidad)!==ent) return false;
-        if(car && (cr.cartera||c.cartera)!==car) return false;
-        if(com && (cr.comercio||'')!==com) return false;
-        const f=normalizarFecha(cr.fecha||'');
-        if(fmd && (!f||f<fmd)) return false;
-        if(fmh && (!f||f>fmh)) return false;
-        return true;
-      });
-    }
-    return true;
-  });
-
-  window._lastConsultaClientes=fil;
-
-  const info=document.getElementById('qcl-info');
-  if(info) info.innerHTML='<strong>'+fil.length+'</strong> cliente/s encontrados';
-
-  const el=document.getElementById('qcl-result');
-  if(!el) return;
-
-  if(!fil.length){
-    el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Sin resultados para los filtros seleccionados</div>';
-    return;
-  }
-
-  // Calcular max telefonos y mails para definir columnas dinamicamente
-  // El ultimo ingresado queda primero (reverse)
-  let maxTels=0, maxMails=0;
-  fil.forEach(function(c){
-    const tels=[...(c.telefonos||[])].reverse();
-    const mails=[...(c.mails||[])].reverse();
-    if(tels.length>maxTels) maxTels=tels.length;
-    if(mails.length>maxMails) maxMails=mails.length;
-  });
-  maxTels=Math.max(maxTels,1);
-  maxMails=Math.max(maxMails,1);
-
-  // Encabezados telefonos
-  let thTels='', thMails='';
-  for(var ti=0;ti<maxTels;ti++) thTels+='<th>'+(ti===0?'Tel\u00e9fono 1':'Tel\u00e9fono '+(ti+1))+'</th>';
-  for(var mi=0;mi<maxMails;mi++) thMails+='<th>'+(mi===0?'Mail 1':'Mail '+(mi+1))+'</th>';
-
-  let rows='';
-  fil.forEach(function(c){
-    const tels=[...(c.telefonos||[])].reverse();
-    const mails=[...(c.mails||[])].reverse();
-    const entidad=(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'—';
-    const cartera=(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'—';
-    const comercio=[...new Set((c.creditos||[]).map(function(cr){return cr.comercio||'';}).filter(Boolean))].join(', ')||'—';
-    const fechas=[...new Set((c.creditos||[]).map(function(cr){return normalizarFecha(cr.fecha||'');}).filter(Boolean))].join(', ')||'—';
-    const sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
-
-    var telCols='', mailCols='';
-    for(var ti=0;ti<maxTels;ti++) telCols+='<td style="user-select:text;cursor:text">'+(tels[ti]||'')+'</td>';
-    for(var mi=0;mi<maxMails;mi++) mailCols+='<td style="user-select:text;cursor:text">'+(mails[mi]||'')+'</td>';
-
-    rows+='<tr onclick="selCliente(\''+c.id+'\');setMod(\'admin\',document.querySelector(\'#modnav .mb\'));setTabAdmin(\'datos\')">'+
-      '<td style="user-select:text;cursor:text">'+(c.dni||'—')+'</td>'+
-      '<td style="user-select:text;cursor:text">'+(c.nombre||'—')+'</td>'+
-      '<td><span class="badge '+sc+'">'+(c.estado||'—')+'</span></td>'+
-      '<td>'+entidad+'</td>'+
-      '<td>'+cartera+'</td>'+
-      '<td>'+comercio+'</td>'+
-      telCols+
-      mailCols+
-      '<td>'+fechas+'</td>'+
-    '</tr>';
-  });
-
-  el.innerHTML=
-    '<div style="overflow-x:auto">'+
-    '<table class="tbl"><thead><tr>'+
-      '<th>DNI</th><th>Nombre</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Comercio</th>'+
-      thTels+thMails+
-      '<th>Fecha mora</th>'+
-    '</tr></thead><tbody>'+rows+'</tbody></table></div>';
-}
-
-function exportarConsultaClientes(){
-  const fil=window._lastConsultaClientes||[];
-  if(!fil.length){ alert('Sin datos para exportar. Aplicar filtros primero.'); return; }
-
-  // Calcular max cols
-  var maxTels=0, maxMails=0;
-  fil.forEach(function(c){
-    if((c.telefonos||[]).length>maxTels) maxTels=(c.telefonos||[]).length;
-    if((c.mails||[]).length>maxMails) maxMails=(c.mails||[]).length;
-  });
-  maxTels=Math.max(maxTels,1);
-  maxMails=Math.max(maxMails,1);
-
-  const rows=fil.map(function(c){
-    const tels=[...(c.telefonos||[])].reverse();
-    const mails=[...(c.mails||[])].reverse();
-    const entidad=(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'';
-    const cartera=(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'';
-    const comercio=[...new Set((c.creditos||[]).map(function(cr){return cr.comercio||'';}).filter(Boolean))].join(', ');
-    const fechas=[...new Set((c.creditos||[]).map(function(cr){return normalizarFecha(cr.fecha||'');}).filter(Boolean))].join(', ');
-    var row={DNI:c.dni||'',Nombre:c.nombre||'',Estado:c.estado||'',Entidad:entidad,Cartera:cartera,Comercio:comercio};
-    for(var ti=0;ti<maxTels;ti++) row['Telefono'+(ti+1)]=(tels[ti]||'');
-    for(var mi=0;mi<maxMails;mi++) row['Mail'+(mi+1)]=(mails[mi]||'');
-    row['FechaMora']=fechas;
-    return row;
-  });
-
-  try {
-    const ws=XLSX.utils.json_to_sheet(rows);
-    const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,'Clientes');
-    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-    const blob=new Blob([wbout],{type:'application/octet-stream'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download='consulta_clientes.xlsx';
-    document.body.appendChild(a); a.click();
-    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);
-  } catch(e){ alert('Error al exportar: '+e.message); }
-}
-
-
-
 
 // ═══════════════════════════════════════════════════
 // HERRAMIENTAS
 // ═══════════════════════════════════════════════════
 function renderHerramientas(){
   document.getElementById('mainArea').innerHTML=`
-  <div class="tabbar" id="herrTabbar">
+  <div class="tabbar">
     <div class="tb active" onclick="setTabHerr('importar',this)">Importar clientes</div>
     <div class="tb" onclick="setTabHerr('exportar',this)">Exportar clientes</div>
-    <div class="tb" onclick="setTabHerr('backup',this)">&#128190; Backup / Recuperar</div>
+    <div class="tb" onclick="setTabHerr('backup',this)">Backup</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
   renderImportar();
 }
 
 function setTabHerr(tab,el){
-  const bar=document.getElementById('herrTabbar');
-  if(bar) bar.querySelectorAll('.tb').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tabbar .tb').forEach(t=>t.classList.remove('active'));
   if(el) el.classList.add('active');
   if(tab==='importar') renderImportar();
   else if(tab==='exportar') renderExportar();
-  else renderBackup();
+  else renderBackupTab();
+}
+
+function renderBackupTab(){
+  const total=DB.clientes.length;
+  const now=new Date().toLocaleString('es-AR');
+  document.getElementById('herrContent').innerHTML=`
+  <div class="card">
+    <div class="card-title" style="margin-bottom:12px">Hacer Backup</div>
+    <p style="font-size:13px;color:#555;margin-bottom:6px">Genera un archivo <strong>.json</strong> con todos los datos del sistema incluyendo tramites. El nombre del archivo incluye fecha y hora exacta.</p>
+    <div style="background:#f5f5f3;border-radius:8px;padding:12px;margin:12px 0;font-size:13px">
+      <div><strong>${total}</strong> clientes en la base actual</div>
+      <div style="font-size:11px;color:#888;margin-top:3px">${now}</div>
+    </div>
+    <button class="btn btn-dark" onclick="hacerBackup()">Descargar Backup</button>
+  </div>
+  <div class="card">
+    <div class="card-title" style="margin-bottom:12px">Restaurar Backup</div>
+    <p style="font-size:13px;color:#555;margin-bottom:12px">Carga un archivo .json de backup para restaurar todos los datos. <span style="color:#791F1F;font-weight:500">Reemplaza la base actual.</span></p>
+    <div class="dropzone" onclick="document.getElementById('bkFileIn').click()" style="border-color:#f0b0b0">
+      <div style="font-size:28px;margin-bottom:8px">📂</div>
+      <div style="font-weight:600;font-size:13px">Clic para seleccionar archivo de backup</div>
+      <div style="font-size:11px;margin-top:4px">Formato: .json (backup_epsan_FECHA.json)</div>
+    </div>
+    <input type="file" id="bkFileIn" accept=".json" style="display:none" onchange="restaurarBackup(event)">
+  </div>`;
 }
 
 function renderImportar(){
@@ -1666,29 +1259,6 @@ function renderImportar(){
   </div>`;
 }
 
-// Normaliza cualquier formato de fecha a yyyy-mm-dd para comparación con input[type=date]
-function normalizarFecha(f){
-  if(!f) return '';
-  f=String(f).trim();
-  // Ya en formato ISO: 2024-03-15
-  if(/^\d{4}-\d{2}-\d{2}$/.test(f)) return f;
-  // Formato dd/mm/yyyy o dd-mm-yyyy
-  var m=f.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
-  // Formato mm/dd/yyyy (americano)
-  var m2=f.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if(m2){
-    var y=m2[3].length===2?'20'+m2[3]:m2[3];
-    return y+'-'+m2[1].padStart(2,'0')+'-'+m2[2].padStart(2,'0');
-  }
-  // Número serial de Excel (días desde 1900-01-01)
-  if(/^\d+$/.test(f)){
-    var serial=parseInt(f);
-    var d=new Date(Date.UTC(1899,11,30)+(serial*86400000));
-    return d.toISOString().slice(0,10);
-  }
-  return f;
-}
 function importarArchivo(e){
   const file=e.target.files[0]; if(!file) return;
   const reader=new FileReader();
@@ -1705,7 +1275,7 @@ function importarArchivo(e){
           rows.push(obj);
         }
       } else {
-        const wb=XLSX.read(ev.target.result,{type:'binary',cellDates:true,raw:false});
+        const wb=XLSX.read(ev.target.result,{type:'binary'});
         const ws=wb.Sheets[wb.SheetNames[0]];
         const data=XLSX.utils.sheet_to_json(ws,{raw:false});
         rows=data.map(r=>{const obj={};Object.keys(r).forEach(k=>obj[k.toLowerCase().trim().replace(/[^a-z]/g,'')]=String(r[k]||'').trim());return obj;});
@@ -1722,31 +1292,22 @@ function importarArchivo(e){
             domicilio:r.domicilio||'',localidad:r.localidad||'',cp:r.cp||'',
             entidad:r.entidad||'',cartera:r.cartera||'',
             estado:r.estado||'Pendiente',
-            telefonos:[],mails:[],
+            telefonos:r.telefono?[r.telefono]:[],
+            mails:r.mail?[r.mail]:[],
             creditos:[],tramites:[],obs:''
           };
         }
-        // Acumular TODOS los teléfonos de todas las columnas tel1..tel9 y telefono
-        ['telefono','tel1','tel2','tel3','tel4','tel5','tel6','tel7','tel8','tel9',
-         'celular','cel','movil','fijo','tel'].forEach(col=>{
-          const v=(r[col]||'').trim();
-          if(v && !mapa[key].telefonos.includes(v)) mapa[key].telefonos.push(v);
-        });
-        // Acumular todos los mails
-        ['mail','email','correo','mail1','mail2','email1','email2'].forEach(col=>{
-          const v=(r[col]||'').trim();
-          if(v && !mapa[key].mails.includes(v)) mapa[key].mails.push(v);
-        });
-        if(r.credito||r.capital||r.producto||r.fechamora){
+        if(r.credito||r.capital||r.producto){
           mapa[key].creditos.push({
             producto:r.producto||'',comercio:r.comercio||'',num:r.credito||'',
-            fecha:normalizarFecha(r.fechamora||''),capital:r.capital||'',
+            fecha:r.fechamora||'',capital:r.capital||'',
             entidad:r.entidad||'',cartera:r.cartera||'',plan:[]
           });
         }
       });
-      window._importTemp=Object.values(mapa);
-const nuevos=window._importTemp;
+      // *** FIX: usar variable global en lugar de pasar JSON en onclick ***
+      window._importTemp = Object.values(mapa);
+      const nuevos = window._importTemp;
       document.getElementById('imp-preview').innerHTML=`
         <div style="background:#EAF3DE;border-radius:8px;padding:12px;margin-bottom:10px">
           <strong>${nuevos.length} clientes encontrados</strong> para importar
@@ -1763,326 +1324,116 @@ const nuevos=window._importTemp;
   else reader.readAsBinaryString(file);
 }
 
-function extraerDatosImport(n){
-  // Extrae entidades, carteras y comercios nuevos de los clientes importados
-  const ents=new Set(DB.entidades);
-  const cars=new Set(DB.carteras);
-  const coms=new Set((DB.comercios||[]).map(c=>c.nombre).filter(Boolean));
-  n.forEach(c=>{
-    if(c.entidad) ents.add(c.entidad);
-    if(c.cartera) cars.add(c.cartera);
-    (c.creditos||[]).forEach(cr=>{
-      if(cr.entidad) ents.add(cr.entidad);
-      if(cr.cartera) cars.add(cr.cartera);
-      if(cr.comercio) coms.add(cr.comercio);
-    });
-  });
-  DB.entidades=[...ents].filter(Boolean);
-  DB.carteras=[...cars].filter(Boolean);
-  // Agregar comercios nuevos a DB.comercios
-  if(!DB.comercios) DB.comercios=[];
-  const nombresExistentes=new Set(DB.comercios.map(c=>c.nombre));
-  [...coms].filter(Boolean).forEach(nom=>{
-    if(!nombresExistentes.has(nom)) DB.comercios.push({nombre:nom,producto:'',direccion:'',localidad:'',telefono:'',mail:'',datos:''});
-  });
-}
-
-window.confirmarImport=function(){
+window.confirmarImport = async function(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
-  DB.clientes=[...DB.clientes,...n];
   extraerDatosImport(n);
-  saveDB();renderLista();
-  document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ ${n.length} clientes importados</strong></div>`;
+  const ok = await window.importarMasivo(n, false);
+  if(ok){
+    renderLista();
+    document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; '+n.length+' clientes importados correctamente</strong></div>';
+  }
   window._importTemp=null;
-}
-window.confirmarReemplazar=function(){
+};
+window.confirmarReemplazar = async function(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
-  if(!confirm('¿Reemplazar toda la base con '+n.length+' clientes?'))return;
-  DB.clientes=n;
+  if(!confirm('Reemplazar toda la base con '+n.length+' clientes?')) return;
   DB.entidades=[];DB.carteras=[];DB.comercios=[];
   extraerDatosImport(n);
-  saveDB();renderLista();
+  const ok = await window.importarMasivo(n, true);
+  if(ok){
+    renderLista();
+    document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; Base reemplazada con '+n.length+' clientes</strong></div>';
+  }
+  window._importTemp=null;
+};
+
+function confirmarReemplazar(){
+  const n = window._importTemp || [];
+  if(!n.length){alert('No hay datos para importar');return;}
+  if(!confirm(`¿Reemplazar toda la base con ${n.length} clientes nuevos? Esta acción no se puede deshacer.`))return;
+  DB.clientes=n;saveDB();renderLista();
   document.getElementById('imp-preview').innerHTML=`<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>✅ Base reemplazada con ${n.length} clientes</strong></div>`;
   window._importTemp=null;
 }
+
 function renderExportar(){
   const el=document.getElementById('herrContent');
-  // Comercios unicos de creditos + tabla comercios
-  const comerciosEnCreds=[...new Set(DB.clientes.flatMap(c=>(c.creditos||[]).map(cr=>cr.comercio||'')).filter(Boolean))];
-  const comerciosDB=(DB.comercios||[]).map(c=>c.nombre).filter(Boolean);
-  const todosComerciosCombinados=[...new Set([...comerciosEnCreds,...comerciosDB])].sort();
-
   el.innerHTML=`
   <div class="card">
-    <div class="card-title" style="margin-bottom:14px">Exportar clientes filtrados</div>
-    <div class="adv-filters">
-      <div class="fld"><label>Entidad</label>
-        <select id="exp-ent">
-          <option value="">Todas</option>
-          ${DB.entidades.map(e=>`<option>${e}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fld"><label>Cartera</label>
-        <select id="exp-car">
-          <option value="">Todas</option>
-          ${DB.carteras.map(c=>`<option>${c}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fld"><label>Comercio</label>
-        <select id="exp-com">
-          <option value="">Todos</option>
-          ${todosComerciosCombinados.map(c=>`<option>${c}</option>`).join('')}
-        </select>
-      </div>
-      <div class="fld"><label>Fecha mora desde</label>
-        <input type="date" id="exp-fm-desde">
-      </div>
-      <div class="fld"><label>Fecha mora hasta</label>
-        <input type="date" id="exp-fm-hasta">
-      </div>
-    </div>
-    <div id="exp-preview" style="font-size:12px;color:#888;margin:10px 0"></div>
-    <div class="btn-row">
-      <button class="btn btn-outline" onclick="previewExportar()">&#128269; Previsualizar</button>
-      <button class="btn btn-dark" onclick="ejecutarExportar()">&#128229; Descargar Excel</button>
-    </div>
+    <div class="card-title" style="margin-bottom:10px">Exportar base de clientes</div>
+    <p style="font-size:13px;color:#555;margin-bottom:14px">Exporta todos los datos de clientes y créditos. No incluye historial de trámites.</p>
+    <button class="btn btn-dark" onclick="exportarExcel()">📥 Descargar Excel</button>
   </div>`;
 }
 
-function filtrarParaExportar(){
-  const ent=document.getElementById('exp-ent').value;
-  const car=document.getElementById('exp-car').value;
-  const com=document.getElementById('exp-com').value;
-  const fmDesde=document.getElementById('exp-fm-desde').value;
-  const fmHasta=document.getElementById('exp-fm-hasta').value;
-  return DB.clientes.filter(c=>{
-    const creds=(c.creditos||[]);
-    if(ent||car||com||fmDesde||fmHasta){
-      const ok=creds.some(cr=>{
-        const eEnt=!ent||(cr.entidad||c.entidad)===ent;
-        const eCar=!car||(cr.cartera||c.cartera)===car;
-        const eCom=!com||(cr.comercio||'')===com;
-        const f=normalizarFecha(cr.fecha||'');
-        const eFmD=!fmDesde||f>=fmDesde;
-        const eFmH=!fmHasta||f<=fmHasta;
-        return eEnt&&eCar&&eCom&&eFmD&&eFmH;
-      });
-      if(!ok && creds.length===0){
-        return (!ent||c.entidad===ent)&&(!car||c.cartera===car)&&!com&&!fmDesde&&!fmHasta;
-      }
-      return ok;
-    }
-    return true;
-  });
-}
-
-function previewExportar(){
-  const fil=filtrarParaExportar();
-  const el=document.getElementById('exp-preview');
-  if(!el) return;
-  el.innerHTML='<strong>'+fil.length+'</strong> cliente/s encontrados con los filtros seleccionados.';
-  el.style.color=fil.length>0?'#27500A':'#888';
-  el.style.background=fil.length>0?'#EAF3DE':'transparent';
-  el.style.padding=fil.length>0?'8px 12px':'0';
-  el.style.borderRadius='7px';
-}
-
-function ejecutarExportar(){
-  const fil=filtrarParaExportar();
-  exportarExcelClientes(fil,'clientes_filtro');
-}
-
-function exportarExcelClientes(clientes, filename){
-  // Helper: convierte undefined/null a string vacío para evitar errores en XLSX
-  function v(x){ return (x===undefined||x===null)?'':String(x); }
-  const rows=[];
-  clientes.forEach(function(c){
-    const creds=(c.creditos&&c.creditos.length)?c.creditos:[{}];
-    creds.forEach(function(cr){
-      const ult=(c.tramites&&c.tramites.length)?c.tramites[c.tramites.length-1]:null;
-      rows.push({
-        Nombre:v(c.nombre), DNI:v(c.dni), Domicilio:v(c.domicilio),
-        Localidad:v(c.localidad), CP:v(c.cp),
-        Telefonos:v((c.telefonos||[]).join(' / ')),
-        Mails:v((c.mails||[]).join(' / ')),
-        Entidad:v(cr.entidad||c.entidad),
-        Cartera:v(cr.cartera||c.cartera),
-        Estado:v(c.estado),
-        Producto:v(cr.producto),
-        Comercio:v(cr.comercio),
-        Credito:v(cr.num),
-        FechaMora:v(cr.fecha),
-        Capital:v(cr.capital),
-        UltimoTramite:v(ult?ult.nota:''),
-        FechaUltimoTramite:v(ult?ult.fechaHora:''),
-        Observaciones:v(c.obs)
-      });
-    });
-  });
-  try {
-    const ws=XLSX.utils.json_to_sheet(rows);
-    const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,'Clientes');
-    // Usar write + blob para mayor compatibilidad con navegadores modernos
-    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
-    const blob=new Blob([wbout],{type:'application/octet-stream'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=(filename||'clientes')+'.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);
-  } catch(e){
-    alert('Error al generar el archivo: '+e.message);
-  }
-}
-
-function exportarExcel(){
-  exportarExcelClientes(DB.clientes,'clientes');
-}
-
-
-
-// ── BACKUP / RECUPERAR ──
-function renderBackup(){
-  const el=document.getElementById('herrContent');
-  const bkKeys=Object.keys(localStorage).filter(function(k){return k.startsWith('epsan_bk_');}).sort().reverse();
-  const hoy=new Date().toISOString().slice(0,10);
-
-  let bkHtml='';
-  bkKeys.forEach(function(k){
-    const fecha=k.replace('epsan_bk_','');
-    const data=JSON.parse(localStorage.getItem(k)||'{}');
-    const nCli=(data.clientes||[]).length;
-    const esHoy=fecha===hoy;
-    bkHtml+=
-      '<div style="display:flex;align-items:center;justify-content:space-between;'+
-        'padding:11px 14px;border:1px solid #d0e0f0;border-radius:8px;'+
-        'background:'+(esHoy?'#dceeff':'#fff')+';margin-bottom:7px">'+
-        '<div>'+
-          '<span style="font-weight:600;color:#1a3a6b">'+fecha+'</span>'+
-          (esHoy?'<span style="font-size:10px;background:#2557a7;color:#fff;'+
-            'border-radius:99px;padding:1px 8px;margin-left:8px">Hoy</span>':'')+
-          '<span style="font-size:11px;color:#6a8aaa;margin-left:10px">'+
-            nCli+' clientes &nbsp;&middot;&nbsp; '+
-            Math.round((localStorage.getItem(k)||'').length/1024)+' KB'+
-          '</span>'+
-        '</div>'+
-        '<div style="display:flex;gap:6px">'+
-          '<button class="btn btn-outline btn-sm" onclick="descargarBackup(\''+k+'\',\''+fecha+'\')">'+
-            '&#128229; Descargar</button>'+
-          '<button class="btn btn-red btn-sm" onclick="restaurarBackup(\''+k+'\',\''+fecha+'\')">'+
-            '&#8635; Restaurar</button>'+
-        '</div>'+
-      '</div>';
-  });
-
-  if(!bkKeys.length){
-    bkHtml='<div style="color:#aaa;font-size:12px;padding:8px 0">'+
-      'Sin backups guardados aún. Se generan automáticamente cada vez que usás el sistema (una vez por día).'+
-    '</div>';
-  }
-
-  el.innerHTML=
-    '<div class="card">'+
-      '<div class="card-hdr">'+
-        '<div class="card-title">&#128190; Backup y recuperación</div>'+
-        '<button class="btn btn-dark btn-sm" onclick="hacerBackupManual()">'+
-          '&#128190; Guardar backup ahora</button>'+
-      '</div>'+
-      '<p style="font-size:12px;color:#6a8aaa;margin-bottom:14px">'+
-        '&#128229; El botón <strong>Guardar backup ahora</strong> descarga un archivo <strong>.json</strong> '+
-        'directamente a tu equipo — guardalo en una carpeta segura para poder recuperarlo después.<br>'+
-        'Además se intenta guardar una copia automática interna (últimos 3 días) que aparece en la lista de abajo, '+
-        'disponible mientras no borres el caché del navegador.'+
-      '</p>'+
-      bkHtml+
-      '<hr class="sep" style="margin-top:16px">'+
-      '<div class="card-title" style="margin:12px 0 6px">Importar backup desde archivo</div>'+
-      '<p style="font-size:12px;color:#6a8aaa;margin-bottom:8px">'+
-        'Seleccioná un archivo .json exportado previamente para restaurar la base.'+
-      '</p>'+
-      '<input type="file" id="bk-file-input" accept=".json" '+
-        'onchange="importarBackupArchivo(this)" style="font-size:12px">'+
-    '</div>';
-}
-
-function hacerBackupManual(){
-  // Descarga el archivo JSON directamente — funciona siempre, sin depender de localStorage
-  const hoy=new Date().toISOString().slice(0,10);
-  const hora=new Date().toTimeString().slice(0,8).replace(/:/g,'-');
-  const data=JSON.stringify(DB, null, 2);
-  const blob=new Blob([data],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;
-  a.download='backup_cobranzas_'+hoy+'_'+hora+'.json';
-  document.body.appendChild(a);
+// ═══════════════════════════════════════════════════
+// BACKUP Y RESTAURAR
+// ═══════════════════════════════════════════════════
+function hacerBackup(){
+  const now = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const fecha = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const backup = {
+    version: '1.0',
+    fecha: now.toLocaleString('es-AR'),
+    clientes: DB.clientes,
+    entidades: DB.entidades,
+    carteras: DB.carteras
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `backup_epsan_${fecha}.json`;
   a.click();
-  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},300);
-  // También guardar en localStorage si está disponible
-  try {
-    const key='epsan_bk_'+hoy;
-    localStorage.setItem(key, JSON.stringify(DB));
-    const bkKeys=Object.keys(localStorage).filter(function(k){return k.startsWith('epsan_bk_');}).sort();
-    while(bkKeys.length>3){ localStorage.removeItem(bkKeys.shift()); }
-    renderBackup();
-  } catch(e){ /* localStorage no disponible — el archivo ya se descargó */ }
+  URL.revokeObjectURL(a.href);
 }
 
-function descargarBackup(key, fecha){
-  const data=localStorage.getItem(key)||'{}';
-  const blob=new Blob([data],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;
-  a.download='backup_cobranzas_'+fecha+'.json';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);
-}
-
-function restaurarBackup(key, fecha){
-  if(!confirm('Restaurar la base al estado del '+fecha+'?\nSe perderán los cambios realizados después de esa fecha.')) return;
-  try {
-    const data=JSON.parse(localStorage.getItem(key)||'{}');
-    if(!data.clientes) throw new Error('Backup vacío o inválido');
-    DB=data;
-    if(!DB.comercios) DB.comercios=[];
-    saveDB();
-    renderLista();
-    alert('Base restaurada al '+fecha+'. '+DB.clientes.length+' clientes cargados.');
-  } catch(e){
-    alert('Error al restaurar: '+e.message);
-  }
-}
-
-function importarBackupArchivo(input){
-  const file=input.files[0];
-  if(!file) return;
-  const reader=new FileReader();
-  reader.onload=function(e){
-    try {
-      const data=JSON.parse(e.target.result);
-      if(!data.clientes) throw new Error('Formato inválido: no contiene clientes');
-      if(!confirm('Restaurar desde "'+file.name+'"?\n'+
-        data.clientes.length+' clientes encontrados.\n'+
-        'Se reemplazará la base actual.')) return;
-      DB=data;
-      if(!DB.comercios) DB.comercios=[];
-      saveDB();
-      renderLista();
-      alert('Base restaurada desde archivo. '+DB.clientes.length+' clientes cargados.');
+function restaurarBackup(e){
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    try{
+      const backup = JSON.parse(ev.target.result);
+      if(!backup.clientes) throw new Error('Archivo no válido');
+      if(!confirm(`¿Restaurar backup del ${backup.fecha}?\n${backup.clientes.length} clientes.\nSe reemplazará la base actual.`)) return;
+      DB.clientes = backup.clientes;
+      if(backup.entidades) DB.entidades = backup.entidades;
+      if(backup.carteras) DB.carteras = backup.carteras;
+      saveDB(); renderLista(); renderHerramientas();
+      alert(`✅ Backup restaurado correctamente.\n${DB.clientes.length} clientes cargados.`);
     } catch(err){
-      alert('Error al leer el archivo: '+err.message);
+      alert('Error al restaurar: ' + err.message);
     }
   };
   reader.readAsText(file);
 }
 
+function exportarExcel(){
+  const rows=[];
+  DB.clientes.forEach(c=>{
+    const creds=c.creditos&&c.creditos.length?c.creditos:[{}];
+    creds.forEach(cr=>{
+      rows.push({
+        Nombre:c.nombre,DNI:c.dni,Domicilio:c.domicilio,Localidad:c.localidad,CP:c.cp,
+        Telefono:(c.telefonos||[]).join(' / '),Mail:(c.mails||[]).join(' / '),
+        Entidad:cr.entidad||c.entidad,Cartera:cr.cartera||c.cartera,
+        Estado:c.estado,Producto:cr.producto,Comercio:cr.comercio,
+        Credito:cr.num,FechaMora:cr.fecha,Capital:cr.capital,
+        UltimoTramite:c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1].nota:'',
+        FechaUltimoTramite:c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1].fechaHora:'',
+        Observaciones:c.obs
+      });
+    });
+  });
+  const ws=XLSX.utils.json_to_sheet(rows);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Clientes');
+  XLSX.writeFile(wb,'clientes_epsan.xlsx');
+}
+
+// ═══════════════════════════════════════════════════
 // UTILS
 // ═══════════════════════════════════════════════════
 function cerrarModal(id){ document.getElementById(id).classList.remove('open'); }
