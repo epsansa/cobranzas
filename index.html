@@ -9,6 +9,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sistema Collector — EPSAN</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[] };</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -183,7 +184,7 @@ onAuthStateChanged(auth, function(user){
     const emailEl=document.getElementById('user-email');
     if(emailEl) emailEl.textContent=user.email;
     mostrarApp();
-    cargarDatos();
+    var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
   } else {
     // No logueado — mostrar pantalla de login
     mostrarLogin();
@@ -479,25 +480,7 @@ var editandoCredIdx = null;
 var modActivo = 'admin';
 var tabActiva = 'avanzada';
 
-// ═══════════════════════════════════════════════════
-// STORAGE
-// ═══════════════════════════════════════════════════
-let DB = {
-  clientes: [],
-  entidades: ['NEACRED','CREDIL'],
-  carteras: ['Cartera A','Cartera B']
-};
-
-
-function saveDB(){ localStorage.setItem('epsan_v3',JSON.stringify(DB)); }
-
-
-let clienteActivo = null;
-let creditoActivoIdx = null;
-let editandoCliId = null;
-let editandoCredIdx = null;
-let modActivo = 'admin';
-let tabActiva = 'avanzada';
+// Variables ya declaradas arriba — no redeclarar
 
 // ═══════════════════════════════════════════════════
 // MÓDULOS
