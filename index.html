@@ -1387,7 +1387,27 @@ function extraerDatosImport(n){
     if(!nombresExistentes.has(nom)) DB.comercios.push({nombre:nom,producto:'',direccion:'',localidad:'',telefono:'',mail:'',datos:''});
   });
 }
-
+function extraerDatosImport(n){
+  var ents=new Set(DB.entidades);
+  var cars=new Set(DB.carteras);
+  var coms=new Set((DB.comercios||[]).map(function(c){return c.nombre;}).filter(Boolean));
+  n.forEach(function(c){
+    if(c.entidad) ents.add(c.entidad);
+    if(c.cartera) cars.add(c.cartera);
+    (c.creditos||[]).forEach(function(cr){
+      if(cr.entidad) ents.add(cr.entidad);
+      if(cr.cartera) cars.add(cr.cartera);
+      if(cr.comercio) coms.add(cr.comercio);
+    });
+  });
+  DB.entidades=[...ents].filter(Boolean);
+  DB.carteras=[...cars].filter(Boolean);
+  if(!DB.comercios) DB.comercios=[];
+  var nombresExistentes=new Set(DB.comercios.map(function(c){return c.nombre;}));
+  [...coms].filter(Boolean).forEach(function(nom){
+    if(!nombresExistentes.has(nom)) DB.comercios.push({nombre:nom,producto:'',direccion:'',localidad:'',telefono:'',mail:'',datos:''});
+  });
+}
 window.confirmarImport = async function(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
