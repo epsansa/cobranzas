@@ -143,37 +143,80 @@ window.importarMasivo=async function(clientes,reemplazar){
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
 };
 
-// ── CARGAR FIREBASE ──
+// ── CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) ──
 async function cargarDatos(){
   actualizarIndicador('conectando');
+
+  // 1. Intentar cargar desde localStorage primero (carga instantánea)
+  const local=localStorage.getItem('epsan_v3');
+  if(local){
+    try{
+      const d=JSON.parse(local);
+      Object.assign(window.DB,d);
+      if(!window.DB.comercios) window.DB.comercios=[];
+      renderLista();
+      if(window.clienteActivo) renderFicha(); else renderWelcome();
+    }catch(e){}
+  }
+
+  // 2. Luego sincronizar con Firebase en segundo plano
   try {
+    // Cargar config (entidades, carteras, comercios) — documento pequeño
     const cfgSnap=await getDoc(CONFIG_REF);
-    if(cfgSnap.exists()){ const cfg=cfgSnap.data(); window.DB.entidades=cfg.entidades||[]; window.DB.carteras=cfg.carteras||[]; window.DB.comercios=cfg.comercios||[]; }
+    if(cfgSnap.exists()){
+      const cfg=cfgSnap.data();
+      window.DB.entidades=cfg.entidades||window.DB.entidades||[];
+      window.DB.carteras=cfg.carteras||window.DB.carteras||[];
+      window.DB.comercios=cfg.comercios||window.DB.comercios||[];
+    }
+
+    // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
     const cliSnap=await getDocs(CLIENTES_COL);
     window.DB.clientes=[];
-    cliSnap.forEach(d=>{ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+    cliSnap.forEach(function(d){
+      try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
+    });
     if(!window.DB.comercios) window.DB.comercios=[];
-    window._fbConnected=true; actualizarIndicador('ok');
+
+    window._fbConnected=true;
+    actualizarIndicador('ok');
+
+    // Guardar en localStorage para próxima carga rápida
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+
     renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
-    onSnapshot(CONFIG_REF,function(snap){ if(!snap.exists()) return; const cfg=snap.data(); window.DB.entidades=cfg.entidades||window.DB.entidades; window.DB.carteras=cfg.carteras||window.DB.carteras; window.DB.comercios=cfg.comercios||window.DB.comercios; });
-    onSnapshot(CLIENTES_COL,function(snap){
-      if(window._fbSaving) return;
-      snap.docChanges().forEach(change=>{
-        try {
-          const cliente=JSON.parse(change.doc.data().data);
-          if(change.type==='added'||change.type==='modified'){ const idx=window.DB.clientes.findIndex(c=>c.id===cliente.id); if(idx>=0) window.DB.clientes[idx]=cliente; else window.DB.clientes.push(cliente); if(window.clienteActivo&&window.clienteActivo.id===cliente.id){ window.clienteActivo=cliente; renderFicha(); } }
-          else if(change.type==='removed'){ window.DB.clientes=window.DB.clientes.filter(c=>c.id!==change.doc.id); }
-        } catch(e){}
-      });
-      renderLista(); actualizarIndicador('ok');
+
+    // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
+    // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
+    onSnapshot(CONFIG_REF,function(snap){
+      if(!snap.exists()) return;
+      const cfg=snap.data();
+      window.DB.entidades=cfg.entidades||window.DB.entidades;
+      window.DB.carteras=cfg.carteras||window.DB.carteras;
+      window.DB.comercios=cfg.comercios||window.DB.comercios;
     });
+
+    // 4. Botón para refrescar clientes manualmente si lo necesitan
+    window.refrescarClientes = async function(){
+      actualizarIndicador('conectando');
+      const snap=await getDocs(CLIENTES_COL);
+      window.DB.clientes=[];
+      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+      try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+      actualizarIndicador('ok');
+      renderLista();
+      if(window.clienteActivo) renderFicha(); else renderWelcome();
+    };
+
   } catch(e){
-    console.error('Error Firebase:',e); window._fbConnected=false; actualizarIndicador('error');
-    const local=localStorage.getItem('epsan_v3');
-    if(local){ try{ const d=JSON.parse(local); Object.assign(window.DB,d); if(!window.DB.comercios) window.DB.comercios=[]; }catch(e2){} }
-    renderLista(); if(window.clienteActivo) renderFicha(); else renderWelcome();
+    console.error('Error Firebase:',e);
+    window._fbConnected=false;
+    actualizarIndicador('error');
+    // Fallback: usar lo que ya cargamos de localStorage
+    if(!window.DB.comercios) window.DB.comercios=[];
+    renderLista();
+    if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
 }
 
@@ -334,6 +377,7 @@ a{color:inherit;text-decoration:none}
   </div>
   <div class="topnav-right">
     <span id="user-email"></span>
+    <button class="btn-logout" onclick="window.refrescarClientes&&window.refrescarClientes()" style="margin-right:4px" title="Sincronizar clientes">&#8635; Sincronizar</button>
     <button class="btn-logout" onclick="logoutEpsan()">Salir</button>
   </div>
 </div>
@@ -1387,27 +1431,7 @@ function extraerDatosImport(n){
     if(!nombresExistentes.has(nom)) DB.comercios.push({nombre:nom,producto:'',direccion:'',localidad:'',telefono:'',mail:'',datos:''});
   });
 }
-function extraerDatosImport(n){
-  var ents=new Set(DB.entidades);
-  var cars=new Set(DB.carteras);
-  var coms=new Set((DB.comercios||[]).map(function(c){return c.nombre;}).filter(Boolean));
-  n.forEach(function(c){
-    if(c.entidad) ents.add(c.entidad);
-    if(c.cartera) cars.add(c.cartera);
-    (c.creditos||[]).forEach(function(cr){
-      if(cr.entidad) ents.add(cr.entidad);
-      if(cr.cartera) cars.add(cr.cartera);
-      if(cr.comercio) coms.add(cr.comercio);
-    });
-  });
-  DB.entidades=[...ents].filter(Boolean);
-  DB.carteras=[...cars].filter(Boolean);
-  if(!DB.comercios) DB.comercios=[];
-  var nombresExistentes=new Set(DB.comercios.map(function(c){return c.nombre;}));
-  [...coms].filter(Boolean).forEach(function(nom){
-    if(!nombresExistentes.has(nom)) DB.comercios.push({nombre:nom,producto:'',direccion:'',localidad:'',telefono:'',mail:'',datos:''});
-  });
-}
+
 window.confirmarImport = async function(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
