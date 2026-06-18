@@ -676,7 +676,11 @@ function aplicarAvanzada(){
   });
   const el=document.getElementById('avanzada-resultado');
   if(!fil.length){el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Sin resultados</div>';return;}
-  el.innerHTML=`<table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th></tr></thead><tbody>`+
+  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <span style="font-size:12px;font-weight:600;color:#2557a7">${fil.length} cliente/s encontrado/s</span>
+    <button class="btn btn-green btn-sm" onclick="exportarResultadoAvanzada()">&#128229; Exportar Excel</button>
+  </div>
+  <table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th></tr></thead><tbody>`+
     fil.map(c=>`<tr onclick="selCliente('${c.id}');setTabAdmin('datos')">
       <td>${c.nombre||'—'}</td><td>${c.dni||'—'}</td>
       <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado||'—'}</span></td>
@@ -1451,15 +1455,140 @@ window.confirmarReemplazar = async function(){
   window._importTemp=null;
 }
 
+function exportarResultadoAvanzada(){
+  const ent=document.getElementById('adv-ent')?document.getElementById('adv-ent').value:'';
+  const car=document.getElementById('adv-car')?document.getElementById('adv-car').value:'';
+  const est=document.getElementById('adv-est')?document.getElementById('adv-est').value:'';
+  const fil=DB.clientes.filter(function(c){
+    const enEnt=!ent||(c.creditos||[]).some(function(x){return x.entidad===ent;})||c.entidad===ent;
+    const enCar=!car||(c.creditos||[]).some(function(x){return x.cartera===car;})||c.cartera===car;
+    return enEnt&&enCar&&(!est||c.estado===est);
+  });
+  exportarExcelClientes(fil,'avanzada_filtro');
+}
+
 function renderExportar(){
   const el=document.getElementById('herrContent');
+  const coms=[...new Set(DB.clientes.flatMap(function(c){return (c.creditos||[]).map(function(cr){return cr.comercio||'';});}).filter(Boolean))].sort();
   el.innerHTML=`
   <div class="card">
-    <div class="card-title" style="margin-bottom:10px">Exportar base de clientes</div>
-    <p style="font-size:13px;color:#555;margin-bottom:14px">Exporta todos los datos de clientes y créditos. No incluye historial de trámites.</p>
-    <button class="btn btn-dark" onclick="exportarExcel()">📥 Descargar Excel</button>
+    <div class="card-title" style="margin-bottom:14px">Exportar clientes filtrados</div>
+    <div class="adv-filters">
+      <div class="fld"><label>Entidad</label>
+        <select id="exp-ent" onchange="previewExportar()">
+          <option value="">Todas</option>
+          ${DB.entidades.map(function(e){return '<option>'+e+'</option>';}).join('')}
+        </select>
+      </div>
+      <div class="fld"><label>Cartera</label>
+        <select id="exp-car" onchange="previewExportar()">
+          <option value="">Todas</option>
+          ${DB.carteras.map(function(c){return '<option>'+c+'</option>';}).join('')}
+        </select>
+      </div>
+      <div class="fld"><label>Comercio</label>
+        <select id="exp-com" onchange="previewExportar()">
+          <option value="">Todos</option>
+          ${coms.map(function(c){return '<option>'+c+'</option>';}).join('')}
+        </select>
+      </div>
+      <div class="fld"><label>Estado</label>
+        <select id="exp-est" onchange="previewExportar()">
+          <option value="">Todos</option>
+          <option>Pendiente</option><option>En acuerdo</option><option>Cancelado</option><option>Sin contacto</option>
+        </select>
+      </div>
+      <div class="fld"><label>Fecha mora desde</label>
+        <input type="date" id="exp-fmd" onchange="previewExportar()">
+      </div>
+      <div class="fld"><label>Fecha mora hasta</label>
+        <input type="date" id="exp-fmh" onchange="previewExportar()">
+      </div>
+    </div>
+    <div id="exp-preview" style="font-size:13px;margin:12px 0;padding:10px 14px;background:#f4f8fd;border-radius:8px;color:#2557a7;font-weight:500">
+      ${DB.clientes.length} clientes en total — seleccioná filtros para reducir
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-dark" onclick="ejecutarExportar()">&#128229; Descargar Excel</button>
+    </div>
   </div>`;
 }
+
+function filtrarParaExportar(){
+  const ent=document.getElementById('exp-ent').value;
+  const car=document.getElementById('exp-car').value;
+  const com=document.getElementById('exp-com').value;
+  const est=document.getElementById('exp-est').value;
+  const fmd=document.getElementById('exp-fmd').value;
+  const fmh=document.getElementById('exp-fmh').value;
+  return DB.clientes.filter(function(c){
+    if(est&&c.estado!==est) return false;
+    const creds=c.creditos||[];
+    if(ent||car||com||fmd||fmh){
+      return creds.some(function(cr){
+        if(ent&&(cr.entidad||c.entidad)!==ent) return false;
+        if(car&&(cr.cartera||c.cartera)!==car) return false;
+        if(com&&(cr.comercio||'')!==com) return false;
+        const f=cr.fecha||'';
+        if(fmd&&(!f||f<fmd)) return false;
+        if(fmh&&(!f||f>fmh)) return false;
+        return true;
+      });
+    }
+    return true;
+  });
+}
+
+function previewExportar(){
+  const fil=filtrarParaExportar();
+  const el=document.getElementById('exp-preview');
+  if(!el) return;
+  el.textContent=fil.length+' cliente/s encontrados con los filtros seleccionados';
+  el.style.color=fil.length>0?'#27500A':'#888';
+  el.style.background=fil.length>0?'#EAF3DE':'#f5f5f3';
+}
+
+function ejecutarExportar(){
+  const fil=filtrarParaExportar();
+  if(!fil.length){alert('No hay clientes para exportar con los filtros seleccionados');return;}
+  exportarExcelClientes(fil,'clientes_exportados');
+}
+
+function exportarExcelClientes(clientes,filename){
+  function v(x){return(x===undefined||x===null)?'':String(x);}
+  const rows=[];
+  clientes.forEach(function(c){
+    const creds=(c.creditos&&c.creditos.length)?c.creditos:[{}];
+    creds.forEach(function(cr){
+      const ult=(c.tramites&&c.tramites.length)?c.tramites[c.tramites.length-1]:null;
+      rows.push({
+        Nombre:v(c.nombre),DNI:v(c.dni),Domicilio:v(c.domicilio),
+        Localidad:v(c.localidad),CP:v(c.cp),
+        Telefonos:v((c.telefonos||[]).join(' / ')),
+        Mails:v((c.mails||[]).join(' / ')),
+        Entidad:v(cr.entidad||c.entidad),Cartera:v(cr.cartera||c.cartera),
+        Estado:v(c.estado),Producto:v(cr.producto),Comercio:v(cr.comercio),
+        Credito:v(cr.num),FechaMora:v(cr.fecha),Capital:v(cr.capital),
+        UltimoTramite:v(ult?ult.nota:''),FechaUltimoTramite:v(ult?ult.fechaHora:''),
+        Observaciones:v(c.obs)
+      });
+    });
+  });
+  try{
+    const ws=XLSX.utils.json_to_sheet(rows);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Clientes');
+    const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+    const blob=new Blob([wbout],{type:'application/octet-stream'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=(filename||'clientes')+'.xlsx';
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);
+  }catch(e){alert('Error al exportar: '+e.message);}
+}
+
+function exportarExcel(){ exportarExcelClientes(DB.clientes,'clientes'); }
 
 // ═══════════════════════════════════════════════════
 // BACKUP Y RESTAURAR
