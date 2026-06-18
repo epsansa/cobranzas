@@ -796,13 +796,36 @@ function renderTramites(){
   ${trs.length?trs.map((t,i)=>`
   <div class="tr-item ${i===0?'last':''}">
     <div class="tr-hdr">
-      <div><span class="tr-tipo">${t.tipo}</span> ${i===0?'<span style="font-size:9px;color:#4a8a1a;margin-left:5px">● ÚLTIMO</span>':''}</div>
-      <div class="tr-fecha">${t.fechaHora}</div>
+      <div><span class="tr-tipo">${t.tipo}</span> ${i===0?'<span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; ÚLTIMO</span>':''}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="tr-fecha">${t.fechaHora}</span>
+        <button class="btn btn-outline btn-sm" onclick="abrirEditarTramite(${(c.tramites||[]).length-1-i})" title="Editar">&#9998;</button>
+        <button class="btn btn-red btn-sm" onclick="eliminarTramite(${(c.tramites||[]).length-1-i})" title="Eliminar">&#10005;</button>
+      </div>
     </div>
     <div class="tr-nota">${t.nota}</div>
-    ${t.estadoCambio?`<div style="margin-top:5px;font-size:10px;color:#888">Estado → <strong>${t.estadoCambio}</strong></div>`:''}
+    ${t.estadoCambio?`<div style="margin-top:5px;font-size:10px;color:#888">Estado &#8594; <strong>${t.estadoCambio}</strong></div>`:''}
     ${t.tel?`<div style="margin-top:5px;font-size:10px;color:#888">Tel utilizado: <strong>${t.tel}</strong></div>`:''}
   </div>`).join(''):'<div style="color:#aaa;font-size:13px;padding:10px">Sin trámites registrados</div>'}`;
+}
+
+function eliminarTramite(idx){
+  if(!confirm('¿Eliminar este trámite?')) return;
+  const ci=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
+  DB.clientes[ci].tramites.splice(idx,1);
+  clienteActivo=DB.clientes[ci];
+  saveDB(clienteActivo);
+  setTabAdmin('tramites');
+}
+
+function abrirEditarTramite(idx){
+  const t=clienteActivo.tramites[idx];
+  document.getElementById('tr-nota').value=t.nota||'';
+  document.getElementById('tr-tel').value=t.tel||'';
+  document.getElementById('tr-est').value=t.estadoCambio||'';
+  document.getElementById('tr-tipo').value=t.tipo||'Llamado telefónico';
+  window._editandoTramiteIdx=idx;
+  document.getElementById('modalTr').classList.add('open');
 }
 
 // ── TAB BUSQUEDA ──
@@ -1105,6 +1128,7 @@ function toggleCuota(ci,pi){
 
 // ── TRÁMITES ──
 function abrirTramite(){
+  window._editandoTramiteIdx=null;
   document.getElementById('tr-nota').value='';
   document.getElementById('tr-tel').value='';
   document.getElementById('tr-est').value='';
@@ -1117,23 +1141,33 @@ function guardarTramite(){
   if(!nota){alert('El detalle es obligatorio');return;}
   const tel=document.getElementById('tr-tel').value.trim();
   const est=document.getElementById('tr-est').value;
-  const now=new Date();
-  const fechaHora=now.toLocaleDateString('es-AR')+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-  const tramite={
-    tipo:document.getElementById('tr-tipo').value,
-    fechaHora,
-    nota,
-    tel:tel||null,
-    estadoCambio:est||null
-  };
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
-  if(!DB.clientes[idx].tramites) DB.clientes[idx].tramites=[];
-  DB.clientes[idx].tramites.push(tramite);
-  if(est) DB.clientes[idx].estado=est;
-  // Agregar tel si no existe
-  if(tel && !DB.clientes[idx].telefonos.includes(tel)){
-    DB.clientes[idx].telefonos.push(tel+' (tramite '+fechaHora.slice(0,10)+')');
+
+  if(window._editandoTramiteIdx !== undefined && window._editandoTramiteIdx !== null){
+    // Editar trámite existente
+    DB.clientes[idx].tramites[window._editandoTramiteIdx].tipo=document.getElementById('tr-tipo').value;
+    DB.clientes[idx].tramites[window._editandoTramiteIdx].nota=nota;
+    DB.clientes[idx].tramites[window._editandoTramiteIdx].tel=tel||null;
+    DB.clientes[idx].tramites[window._editandoTramiteIdx].estadoCambio=est||null;
+    window._editandoTramiteIdx=null;
+  } else {
+    // Nuevo trámite
+    const now=new Date();
+    const fechaHora=now.toLocaleDateString('es-AR')+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    const tramite={
+      tipo:document.getElementById('tr-tipo').value,
+      fechaHora,nota,
+      tel:tel||null,
+      estadoCambio:est||null
+    };
+    if(!DB.clientes[idx].tramites) DB.clientes[idx].tramites=[];
+    DB.clientes[idx].tramites.push(tramite);
+    if(est) DB.clientes[idx].estado=est;
+    if(tel && !DB.clientes[idx].telefonos.includes(tel)){
+      DB.clientes[idx].telefonos.push(tel+' (tramite '+fechaHora.slice(0,10)+')');
+    }
   }
+
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);renderLista();cerrarModal('modalTr');setTabAdmin('tramites');
 }
