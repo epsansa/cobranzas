@@ -793,31 +793,32 @@ function renderTramites(){
     <div style="font-size:15px;font-weight:600">Trámites (${(c.tramites||[]).length})</div>
     <button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo trámite</button>
   </div>
-  ${trs.length?trs.map((t,i)=>`
+  ${trs.length?trs.map((t,i)=>{
+    const idxReal=(c.tramites||[]).length-1-i;
+    return `
   <div class="tr-item ${i===0?'last':''}">
     <div class="tr-hdr">
       <div><span class="tr-tipo">${t.tipo}</span> ${i===0?'<span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; ÚLTIMO</span>':''}</div>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="tr-fecha">${t.fechaHora}</span>
-        <button class="btn btn-outline btn-sm" onclick="abrirEditarTramite(${(c.tramites||[]).length-1-i})" title="Editar">&#9998;</button>
-        <button class="btn btn-red btn-sm" onclick="eliminarTramite(${(c.tramites||[]).length-1-i})" title="Eliminar">&#10005;</button>
+        <button class="btn btn-red btn-sm" onclick="eliminarTramite(${idxReal})" title="Eliminar trámite">✕</button>
       </div>
     </div>
     <div class="tr-nota">${t.nota}</div>
     ${t.estadoCambio?`<div style="margin-top:5px;font-size:10px;color:#888">Estado &#8594; <strong>${t.estadoCambio}</strong></div>`:''}
     ${t.tel?`<div style="margin-top:5px;font-size:10px;color:#888">Tel utilizado: <strong>${t.tel}</strong></div>`:''}
-  </div>`).join(''):'<div style="color:#aaa;font-size:13px;padding:10px">Sin trámites registrados</div>'}`;
+  </div>`;
+  }).join(''):'<div style="color:#aaa;font-size:13px;padding:10px">Sin trámites registrados</div>'}`;
 }
 
 function eliminarTramite(idx){
   if(!confirm('¿Eliminar este trámite?')) return;
-  const ci=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
-  DB.clientes[ci].tramites.splice(idx,1);
-  clienteActivo=DB.clientes[ci];
+  const idxCli=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
+  DB.clientes[idxCli].tramites.splice(idx,1);
+  clienteActivo=DB.clientes[idxCli];
   saveDB(clienteActivo);
   setTabAdmin('tramites');
 }
-
 function abrirEditarTramite(idx){
   const t=clienteActivo.tramites[idx];
   document.getElementById('tr-nota').value=t.nota||'';
