@@ -832,7 +832,7 @@ function eliminarTramite(idx){
   setTabAdmin('tramites');
 }
   function cambiarEstadoCliente(){
-  var nuevoEstado=document.getElementById('estado-cliente-sel').value;
+  var nuevoEstado=document.getElementById('est-cli').value;
   if(!nuevoEstado) return;
   var idxCli=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
   DB.clientes[idxCli].estado=nuevoEstado;
