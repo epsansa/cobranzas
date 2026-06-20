@@ -102,7 +102,7 @@ window.saveDB=function(clienteModificado){
   clearTimeout(_saveTimer);
   _saveTimer=setTimeout(async function(){
     try {
-      await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
+      entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto']
       if(clienteModificado&&clienteModificado.id){
         await setDoc(doc(db_fs,'clientes',clienteModificado.id),{data:JSON.stringify(clienteModificado),ts:serverTimestamp()});
       }
@@ -139,7 +139,7 @@ window.importarMasivo=async function(clientes,reemplazar){
       await b.commit();
       actualizarIndicador('guardando',(i+Math.min(BSIZ,clientes.length-i))+'/'+clientes.length);
     }
-    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
+    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto']
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
@@ -172,8 +172,8 @@ if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','
       window.DB.entidades=cfg.entidades||window.DB.entidades||[];
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
+      window.DB.estados=cfg.estados||window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
     }
-
     // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
     const cliSnap=await getDocs(CLIENTES_COL);
     window.DB.clientes=[];
