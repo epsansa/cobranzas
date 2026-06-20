@@ -798,8 +798,8 @@ function renderTramites(){
   html+='<option value="Cancelado" '+(c.estado==="Cancelado"?"selected":"")+'>Cancelado</option>';
   html+='<option value="Sin contacto" '+(c.estado==="Sin contacto"?"selected":"")+'>Sin contacto</option>';
   html+='</select>';
-  html+='<button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo tr&aacute;mite</button>';
-  html+='</div></div>';
+  html+='<div style="display:flex;gap:7px;align-items:center"><select id="est-cli" onchange="cambiarEstadoCliente()" style="padding:5px 8px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none"><option value="Pendiente" '+(c.estado==="Pendiente"?"selected":"")+'>Pendiente</option><option value="En acuerdo" '+(c.estado==="En acuerdo"?"selected":"")+'>En acuerdo</option><option value="Cancelado" '+(c.estado==="Cancelado"?"selected":"")+'>Cancelado</option><option value="Sin contacto" '+(c.estado==="Sin contacto"?"selected":"")+'>Sin contacto</option></select><button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo tr&aacute;mite</button></div></div>';
+
   if(!trs.length){
     html+='<div style="color:#aaa;font-size:13px;padding:10px">Sin tr&aacute;mites registrados</div>';
   } else {
