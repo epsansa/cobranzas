@@ -180,6 +180,7 @@ if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','
     cliSnap.forEach(function(d){
       try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
     });
+    if(!window.DB.estados||!window.DB.estados.length) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
     if(!window.DB.comercios) window.DB.comercios=[];
 if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
 
