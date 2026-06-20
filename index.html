@@ -7,12 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Sistema de Cobranzas">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sistema Collector — EPSAN v2</title>
-<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="pragma" content="no-cache">
-<meta http-equiv="expires" content="0">
+<title>Sistema Collector — EPSAN</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:['Pendiente','En acuerdo','Cancelado','Sin contacto'] };</script>
+<script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[] };</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -102,7 +99,7 @@ window.saveDB=function(clienteModificado){
   clearTimeout(_saveTimer);
   _saveTimer=setTimeout(async function(){
     try {
-      entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto']
+      await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
       if(clienteModificado&&clienteModificado.id){
         await setDoc(doc(db_fs,'clientes',clienteModificado.id),{data:JSON.stringify(clienteModificado),ts:serverTimestamp()});
       }
@@ -139,7 +136,7 @@ window.importarMasivo=async function(clientes,reemplazar){
       await b.commit();
       actualizarIndicador('guardando',(i+Math.min(BSIZ,clientes.length-i))+'/'+clientes.length);
     }
-    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto']
+    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
@@ -157,7 +154,6 @@ async function cargarDatos(){
       const d=JSON.parse(local);
       Object.assign(window.DB,d);
       if(!window.DB.comercios) window.DB.comercios=[];
-if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
       renderLista();
       if(window.clienteActivo) renderFicha(); else renderWelcome();
     }catch(e){}
@@ -172,17 +168,15 @@ if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','
       window.DB.entidades=cfg.entidades||window.DB.entidades||[];
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
-      window.DB.estados=cfg.estados||window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
     }
+
     // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
     const cliSnap=await getDocs(CLIENTES_COL);
     window.DB.clientes=[];
     cliSnap.forEach(function(d){
       try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
     });
-    if(!window.DB.estados||!window.DB.estados.length) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
     if(!window.DB.comercios) window.DB.comercios=[];
-if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
 
     window._fbConnected=true;
     actualizarIndicador('ok');
@@ -221,7 +215,6 @@ if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','
     actualizarIndicador('error');
     // Fallback: usar lo que ya cargamos de localStorage
     if(!window.DB.comercios) window.DB.comercios=[];
-if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
     renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
@@ -352,7 +345,6 @@ a{color:inherit;text-decoration:none}
 .dropzone:hover{border-color:#888}
 </style>
 </head>
-</head>
 <body>
 
 <!-- PANTALLA LOGIN -->
@@ -472,7 +464,7 @@ a{color:inherit;text-decoration:none}
         <select id="tr-tipo"><option>Llamado telef&#243;nico</option><option>WhatsApp</option><option>Mail</option><option>Acuerdo de pago</option><option>Pago recibido</option><option>Sin respuesta</option><option>N&#250;mero incorrecto</option><option>Promesa de pago</option><option>Carta documento</option><option>Otro</option></select>
       </div>
       <div class="fld"><label>Estado cliente</label>
-<select id="tr-est" id="tr-est"></select>  
+        <select id="tr-est"><option value="">&#8212; Sin cambio &#8212;</option><option>Pendiente</option><option>En acuerdo</option><option>Cancelado</option><option>Sin contacto</option></select>
       </div>
     </div>
     <div class="fld"><label>Detalle / Nota / Resultado *</label><textarea id="tr-nota" placeholder="Describ&#237; el resultado de la gesti&#243;n..."></textarea></div>
@@ -489,8 +481,8 @@ a{color:inherit;text-decoration:none}
 </div></div>
 
 <div class="modal-overlay" id="modalConfig"><div class="modal">
- <h3>Configurar Entidades, Carteras y Estados</h3>
-  <div class="g2" style="gap:14px;grid-template-columns:1fr 1fr 1fr">
+  <h3>Configurar Entidades y Carteras</h3>
+  <div class="g2" style="gap:14px">
     <div>
       <div class="card-title" style="margin-bottom:8px">Entidades</div>
       <div id="listEntidades"></div>
@@ -508,17 +500,8 @@ a{color:inherit;text-decoration:none}
       </div>
     </div>
   </div>
-    <div>
-      <div class="card-title" style="margin-bottom:8px">Estados</div>
-      <div id="listEstados"></div>
-      <div style="display:flex;gap:6px;margin-top:8px">
-        <input id="newEst" placeholder="Nuevo estado" style="flex:1;padding:6px 9px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none">
-        <button class="btn btn-dark btn-sm" onclick="agregarEstado()">+</button>
-      </div>
-    </div>
-  </div>
   <div class="btn-row" style="margin-top:14px">
-<button class="btn btn-dark" onclick="cerrarModal('modalConfig');renderLista()">Listo</button>
+    <button class="btn btn-dark" onclick="cerrarModal('modalConfig');renderLista()">Listo</button>
   </div>
 </div></div>
 
@@ -800,68 +783,23 @@ function renderCuenta(){
 
 // ── TAB TRAMITES ──
 function renderTramites(){
-  var c=clienteActivo;
-  var trs=(c.tramites||[]).slice().reverse();
-  var total=(c.tramites||[]).length;
-  var html='<div class="card-hdr" style="margin-bottom:10px">';
-  html+='<div style="font-size:15px;font-weight:600">Tr&aacute;mites ('+total+')</div>';
-  html+='<div style="display:flex;gap:7px;align-items:center">';
-  html+='<select id="est-cli" onchange="cambiarEstadoCliente()" style="padding:5px 8px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none">';
-  html+='<option value="Pendiente" '+(c.estado==="Pendiente"?"selected":"")+'>Pendiente</option>';
-  html+='<option value="En acuerdo" '+(c.estado==="En acuerdo"?"selected":"")+'>En acuerdo</option>';
-  html+='<option value="Cancelado" '+(c.estado==="Cancelado"?"selected":"")+'>Cancelado</option>';
-  html+='<option value="Sin contacto" '+(c.estado==="Sin contacto"?"selected":"")+'>Sin contacto</option>';
-  html+='</select>';
-  html+='<div style="display:flex;gap:7px;align-items:center"><select id="est-cli" onchange="cambiarEstadoCliente()" style="padding:5px 8px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none"><option value="Pendiente" '+(c.estado==="Pendiente"?"selected":"")+'>Pendiente</option><option value="En acuerdo" '+(c.estado==="En acuerdo"?"selected":"")+'>En acuerdo</option><option value="Cancelado" '+(c.estado==="Cancelado"?"selected":"")+'>Cancelado</option><option value="Sin contacto" '+(c.estado==="Sin contacto"?"selected":"")+'>Sin contacto</option></select><button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo tr&aacute;mite</button></div></div>';
-
-  if(!trs.length){
-    html+='<div style="color:#aaa;font-size:13px;padding:10px">Sin tr&aacute;mites registrados</div>';
-  } else {
-    trs.forEach(function(t,i){
-      var idxReal=total-1-i;
-      html+='<div class="tr-item '+(i===0?'last':'')+'">';
-      html+='<div class="tr-hdr">';
-      html+='<div><span class="tr-tipo">'+t.tipo+'</span>';
-      if(i===0) html+=' <span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; &Uacute;LTIMO</span>';
-      html+='</div>';
-      html+='<div style="display:flex;align-items:center;gap:8px">';
-      html+='<span class="tr-fecha">'+t.fechaHora+'</span>';
-      html+='<button class="btn btn-red btn-sm" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
-      html+='</div></div>';
-      html+='<div class="tr-nota">'+t.nota+'</div>';
-      if(t.estadoCambio) html+='<div style="margin-top:5px;font-size:10px;color:#888">Estado &rarr; <strong>'+t.estadoCambio+'</strong></div>';
-      if(t.tel) html+='<div style="margin-top:5px;font-size:10px;color:#888">Tel: <strong>'+t.tel+'</strong></div>';
-      html+='</div>';
-    });
-  }
-  return html;
-}
-
-function eliminarTramite(idx){
-  if(!confirm('&#191;Eliminar este tr&aacute;mite?')) return;
-  var idxCli=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
-  DB.clientes[idxCli].tramites.splice(idx,1);
-  clienteActivo=DB.clientes[idxCli];
-  saveDB(clienteActivo);
-  setTabAdmin('tramites');
-}
-  function cambiarEstadoCliente(){
-  var nuevoEstado=document.getElementById('est-cli').value;
-  if(!nuevoEstado) return;
-  var idxCli=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
-  DB.clientes[idxCli].estado=nuevoEstado;
-  clienteActivo=DB.clientes[idxCli];
-  saveDB(clienteActivo);
-  renderLista();
-}
-  function abrirEditarTramite(idx){
-  const t=clienteActivo.tramites[idx];
-  document.getElementById('tr-nota').value=t.nota||'';
-  document.getElementById('tr-tel').value=t.tel||'';
-  document.getElementById('tr-est').value=t.estadoCambio||'';
-  document.getElementById('tr-tipo').value=t.tipo||'Llamado telefónico';
-  window._editandoTramiteIdx=idx;
-  document.getElementById('modalTr').classList.add('open');
+  const c=clienteActivo;
+  const trs=(c.tramites||[]).slice().reverse();
+  return `
+  <div class="card-hdr" style="margin-bottom:10px">
+    <div style="font-size:15px;font-weight:600">Trámites (${(c.tramites||[]).length})</div>
+    <button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo trámite</button>
+  </div>
+  ${trs.length?trs.map((t,i)=>`
+  <div class="tr-item ${i===0?'last':''}">
+    <div class="tr-hdr">
+      <div><span class="tr-tipo">${t.tipo}</span> ${i===0?'<span style="font-size:9px;color:#4a8a1a;margin-left:5px">● ÚLTIMO</span>':''}</div>
+      <div class="tr-fecha">${t.fechaHora}</div>
+    </div>
+    <div class="tr-nota">${t.nota}</div>
+    ${t.estadoCambio?`<div style="margin-top:5px;font-size:10px;color:#888">Estado → <strong>${t.estadoCambio}</strong></div>`:''}
+    ${t.tel?`<div style="margin-top:5px;font-size:10px;color:#888">Tel utilizado: <strong>${t.tel}</strong></div>`:''}
+  </div>`).join(''):'<div style="color:#aaa;font-size:13px;padding:10px">Sin trámites registrados</div>'}`;
 }
 
 // ── TAB BUSQUEDA ──
@@ -1164,15 +1102,10 @@ function toggleCuota(ci,pi){
 
 // ── TRÁMITES ──
 function abrirTramite(){
-  var estados=DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
-  var opts='<option value="">&#8212; Sin cambio &#8212;</option>';
-  estados.forEach(function(e){ opts+='<option>'+e+'</option>'; });
-  document.getElementById('tr-est').innerHTML=opts;
-  window._editandoTramiteIdx=null;
   document.getElementById('tr-nota').value='';
   document.getElementById('tr-tel').value='';
   document.getElementById('tr-est').value='';
-  document.getElementById('tr-tipo').value='Llamado telef\u00f3nico';
+  document.getElementById('tr-tipo').value='Llamado telefónico';
   document.getElementById('modalTr').classList.add('open');
 }
 
@@ -1181,33 +1114,23 @@ function guardarTramite(){
   if(!nota){alert('El detalle es obligatorio');return;}
   const tel=document.getElementById('tr-tel').value.trim();
   const est=document.getElementById('tr-est').value;
+  const now=new Date();
+  const fechaHora=now.toLocaleDateString('es-AR')+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  const tramite={
+    tipo:document.getElementById('tr-tipo').value,
+    fechaHora,
+    nota,
+    tel:tel||null,
+    estadoCambio:est||null
+  };
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
-
-  if(window._editandoTramiteIdx !== undefined && window._editandoTramiteIdx !== null){
-    // Editar trámite existente
-    DB.clientes[idx].tramites[window._editandoTramiteIdx].tipo=document.getElementById('tr-tipo').value;
-    DB.clientes[idx].tramites[window._editandoTramiteIdx].nota=nota;
-    DB.clientes[idx].tramites[window._editandoTramiteIdx].tel=tel||null;
-    DB.clientes[idx].tramites[window._editandoTramiteIdx].estadoCambio=est||null;
-    window._editandoTramiteIdx=null;
-  } else {
-    // Nuevo trámite
-    const now=new Date();
-    const fechaHora=now.toLocaleDateString('es-AR')+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-    const tramite={
-      tipo:document.getElementById('tr-tipo').value,
-      fechaHora,nota,
-      tel:tel||null,
-      estadoCambio:est||null
-    };
-    if(!DB.clientes[idx].tramites) DB.clientes[idx].tramites=[];
-    DB.clientes[idx].tramites.push(tramite);
-    if(est) DB.clientes[idx].estado=est;
-    if(tel && !DB.clientes[idx].telefonos.includes(tel)){
-      DB.clientes[idx].telefonos.push(tel+' (tramite '+fechaHora.slice(0,10)+')');
-    }
+  if(!DB.clientes[idx].tramites) DB.clientes[idx].tramites=[];
+  DB.clientes[idx].tramites.push(tramite);
+  if(est) DB.clientes[idx].estado=est;
+  // Agregar tel si no existe
+  if(tel && !DB.clientes[idx].telefonos.includes(tel)){
+    DB.clientes[idx].telefonos.push(tel+' (tramite '+fechaHora.slice(0,10)+')');
   }
-
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);renderLista();cerrarModal('modalTr');setTabAdmin('tramites');
 }
@@ -1219,30 +1142,18 @@ function abrirConfig(){
 }
 
 function renderConfigListas(){
-  document.getElementById('listEntidades').innerHTML=DB.entidades.map(function(e,i){
-    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+e+'</span><button class="btn btn-red btn-sm" onclick="elimEntidad('+i+')">&#10005;</button></div>';
-  }).join('');
-  document.getElementById('listCarteras').innerHTML=DB.carteras.map(function(c,i){
-    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+c+'</span><button class="btn btn-red btn-sm" onclick="elimCartera('+i+')">&#10005;</button></div>';
-  }).join('');
-  if(!DB.estados) DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
-  document.getElementById('listEstados').innerHTML=DB.estados.map(function(e,i){
-    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+e+'</span><button class="btn btn-red btn-sm" onclick="elimEstado('+i+')">&#10005;</button></div>';
-  }).join('');
+  document.getElementById('listEntidades').innerHTML=DB.entidades.map((e,i)=>`
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="flex:1;font-size:12px">${e}</span>
+      <button class="btn btn-red btn-sm" onclick="elimEntidad(${i})">✕</button>
+    </div>`).join('');
+  document.getElementById('listCarteras').innerHTML=DB.carteras.map((c,i)=>`
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="flex:1;font-size:12px">${c}</span>
+      <button class="btn btn-red btn-sm" onclick="elimCartera(${i})">✕</button>
+    </div>`).join('');
 }
-function agregarEstado(){
-  if(!DB.estados) DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
-  var v=document.getElementById('newEst').value.trim();
-  if(!v) return;
-  DB.estados.push(v);
-  document.getElementById('newEst').value='';
-  saveDBConfig();renderConfigListas();
-}
-function elimEstado(i){
-  if(!DB.estados) return;
-  DB.estados.splice(i,1);
-  saveDBConfig();renderConfigListas();
-}
+
 function agregarEntidad(){
   const v=document.getElementById('newEnt').value.trim();
   if(!v)return;
