@@ -467,7 +467,7 @@ a{color:inherit;text-decoration:none}
         <select id="tr-tipo"><option>Llamado telef&#243;nico</option><option>WhatsApp</option><option>Mail</option><option>Acuerdo de pago</option><option>Pago recibido</option><option>Sin respuesta</option><option>N&#250;mero incorrecto</option><option>Promesa de pago</option><option>Carta documento</option><option>Otro</option></select>
       </div>
       <div class="fld"><label>Estado cliente</label>
-        <select id="tr-est"><option value="">&#8212; Sin cambio &#8212;</option><option>Pendiente</option><option>En acuerdo</option><option>Cancelado</option><option>Sin contacto</option></select>
+<select id="tr-est" id="tr-est"></select>  
       </div>
     </div>
     <div class="fld"><label>Detalle / Nota / Resultado *</label><textarea id="tr-nota" placeholder="Describ&#237; el resultado de la gesti&#243;n..."></textarea></div>
@@ -1159,11 +1159,15 @@ function toggleCuota(ci,pi){
 
 // ── TRÁMITES ──
 function abrirTramite(){
+  var estados=DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
+  var opts='<option value="">&#8212; Sin cambio &#8212;</option>';
+  estados.forEach(function(e){ opts+='<option>'+e+'</option>'; });
+  document.getElementById('tr-est').innerHTML=opts;
   window._editandoTramiteIdx=null;
   document.getElementById('tr-nota').value='';
   document.getElementById('tr-tel').value='';
   document.getElementById('tr-est').value='';
-  document.getElementById('tr-tipo').value='Llamado telefónico';
+  document.getElementById('tr-tipo').value='Llamado telef\u00f3nico';
   document.getElementById('modalTr').classList.add('open');
 }
 
