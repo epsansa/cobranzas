@@ -9,7 +9,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sistema Collector — EPSAN</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[] };</script>
+<script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -34,7 +34,7 @@ window._fbConnected = false;
 window._fbSaving = false;
 window._fbLastSave = null;
 
-// ── AUTH ──
+// -- AUTH --
 window.loginEpsan = async function(){
   const mail = document.getElementById('login-mail').value.trim();
   const pass = document.getElementById('login-pass').value;
@@ -75,7 +75,7 @@ function mostrarApp(){
   document.getElementById('app').style.display='flex';
 }
 
-// ── INDICADOR ──
+// -- INDICADOR --
 function actualizarIndicador(estado, extra){
   const el=document.getElementById('fb-status'); if(!el) return;
   if(estado==='conectando') el.innerHTML='<span style="color:#f5c97a">&#9203; Conectando...</span>';
@@ -86,7 +86,7 @@ function actualizarIndicador(estado, extra){
 }
 function mostrarError(msg){ const el=document.getElementById('fb-status'); if(el) el.innerHTML='<span style="color:#ff8888" title="'+msg+'">&#9888; Error</span>'; }
 
-// ── SAVE ──
+// -- SAVE --
 let _saveTimer=null;
 window.saveDB=function(clienteModificado){
   try {
@@ -99,7 +99,7 @@ window.saveDB=function(clienteModificado){
   clearTimeout(_saveTimer);
   _saveTimer=setTimeout(async function(){
     try {
-      await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
+      await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
       if(clienteModificado&&clienteModificado.id){
         await setDoc(doc(db_fs,'clientes',clienteModificado.id),{data:JSON.stringify(clienteModificado),ts:serverTimestamp()});
       }
@@ -136,14 +136,14 @@ window.importarMasivo=async function(clientes,reemplazar){
       await b.commit();
       actualizarIndicador('guardando',(i+Math.min(BSIZ,clientes.length-i))+'/'+clientes.length);
     }
-    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],ts:serverTimestamp()});
+    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
 };
 
-// ── CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) ──
+// -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
 
@@ -168,6 +168,7 @@ async function cargarDatos(){
       window.DB.entidades=cfg.entidades||window.DB.entidades||[];
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
+      window.DB.estados=cfg.estados||window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
     }
 
     // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
@@ -220,7 +221,7 @@ async function cargarDatos(){
   }
 }
 
-// ── AUTH STATE ──
+// -- AUTH STATE --
 onAuthStateChanged(auth, function(user){
   if(user){
     // Usuario logueado — mostrar app y cargar datos
@@ -506,16 +507,11 @@ a{color:inherit;text-decoration:none}
 </div></div>
 
 <script>
-// ═══════════════════════════════════════════════════
+// ===================================================
 // BASE DE DATOS LOCAL
-// ═══════════════════════════════════════════════════
-var DB = {
-  clientes: [],
-  entidades: [],
-  carteras: [],
-  comercios: []
-};
-window.DB = DB;
+// ===================================================
+// DB es window.DB inicializado antes del modulo Firebase
+var DB = window.DB;
 
 var clienteActivo = null;
 var creditoActivoIdx = null;
@@ -526,9 +522,9 @@ var tabActiva = 'avanzada';
 
 // Variables ya declaradas arriba — no redeclarar
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // MÓDULOS
-// ═══════════════════════════════════════════════════
+// ===================================================
 function setMod(mod, el){
   document.querySelectorAll('.mb').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
@@ -539,9 +535,9 @@ function setMod(mod, el){
   else if(mod==='herramientas') renderHerramientas();
 }
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // LISTA SIDEBAR
-// ═══════════════════════════════════════════════════
+// ===================================================
 function renderLista(){
   // Poblar selects
   poblarSelect('fEnt', DB.entidades, 'Todas las entidades');
@@ -598,9 +594,9 @@ function poblarSelect(id, arr, def){
   el.innerHTML=`<option value="">${def}</option>`+arr.map(v=>`<option ${v===cv?'selected':''}>${v}</option>`).join('');
 }
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // FICHA CLIENTE (tabs)
-// ═══════════════════════════════════════════════════
+// ===================================================
 const TABS_ADMIN = [
   {id:'avanzada',label:'Avanzada'},
   {id:'datos',label:'Datos cliente'},
@@ -638,7 +634,7 @@ function renderTab(){
   attachEvents();
 }
 
-// ── TAB AVANZADA ──
+// -- TAB AVANZADA --
 function renderAvanzada(){
   const c=clienteActivo;
   const ents=DB.entidades.map(e=>`<option ${(c&&c.entidad===e)?'selected':''}>${e}</option>`).join('');
@@ -690,7 +686,7 @@ function aplicarAvanzada(){
     </tr>`).join('')+'</tbody></table>';
 }
 
-// ── TAB DATOS ──
+// -- TAB DATOS --
 function renderDatos(){
   const c=clienteActivo;
   const tels=(c.telefonos||[]).map((t,i)=>`<div class="multi-item"><input value="${t}" onchange="editTel(${i},this.value)"><button class="btn btn-red btn-sm" onclick="delTel(${i})">✕</button></div>`).join('');
@@ -726,7 +722,7 @@ function renderDatos(){
   </div>`;
 }
 
-// ── TAB CUENTA CORRIENTE ──
+// -- TAB CUENTA CORRIENTE --
 function renderCuenta(){
   const c=clienteActivo;
   const creds=c.creditos||[];
@@ -781,28 +777,42 @@ function renderCuenta(){
   ${crList||'<div style="color:#aaa;font-size:13px;padding:10px">Sin créditos cargados</div>'}`;
 }
 
-// ── TAB TRAMITES ──
+// -- TAB TRAMITES --
 function renderTramites(){
-  const c=clienteActivo;
-  const trs=(c.tramites||[]).slice().reverse();
-  return `
-  <div class="card-hdr" style="margin-bottom:10px">
-    <div style="font-size:15px;font-weight:600">Trámites (${(c.tramites||[]).length})</div>
-    <button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo trámite</button>
-  </div>
-  ${trs.length?trs.map((t,i)=>`
-  <div class="tr-item ${i===0?'last':''}">
-    <div class="tr-hdr">
-      <div><span class="tr-tipo">${t.tipo}</span> ${i===0?'<span style="font-size:9px;color:#4a8a1a;margin-left:5px">● ÚLTIMO</span>':''}</div>
-      <div class="tr-fecha">${t.fechaHora}</div>
-    </div>
-    <div class="tr-nota">${t.nota}</div>
-    ${t.estadoCambio?`<div style="margin-top:5px;font-size:10px;color:#888">Estado → <strong>${t.estadoCambio}</strong></div>`:''}
-    ${t.tel?`<div style="margin-top:5px;font-size:10px;color:#888">Tel utilizado: <strong>${t.tel}</strong></div>`:''}
-  </div>`).join(''):'<div style="color:#aaa;font-size:13px;padding:10px">Sin trámites registrados</div>'}`;
+  var c=clienteActivo;
+  var trs=(c.tramites||[]).slice().reverse();
+  var total=(c.tramites||[]).length;
+  var estados=DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
+  var estOpts=estados.map(function(e){return '<option value="'+e+'" '+(c.estado===e?'selected':'')+'>'+e+'</option>';}).join('');
+  var html='<div class="card-hdr" style="margin-bottom:10px">';
+  html+='<div style="font-size:15px;font-weight:600">Tr&aacute;mites ('+total+')</div>';
+  html+='<div style="display:flex;gap:7px;align-items:center">';
+  html+='<select id="est-cli" onchange="cambiarEstadoCliente()" style="padding:5px 8px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none">'+estOpts+'</select>';
+  html+='<button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo tr&aacute;mite</button>';
+  html+='</div></div>';
+  if(!trs.length){
+    html+='<div style="color:#aaa;font-size:13px;padding:10px">Sin tr&aacute;mites registrados</div>';
+  } else {
+    trs.forEach(function(t,i){
+      var idxReal=total-1-i;
+      html+='<div class="tr-item '+(i===0?'last':'')+'">';
+      html+='<div class="tr-hdr">';
+      html+='<div><span class="tr-tipo">'+t.tipo+'</span>';
+      if(i===0) html+=' <span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; &Uacute;LTIMO</span>';
+      html+='</div>';
+      html+='<div style="display:flex;align-items:center;gap:8px">';
+      html+='<span class="tr-fecha">'+t.fechaHora+'</span>';
+      html+='<button class="btn btn-red btn-sm" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
+      html+='</div></div>';
+      html+='<div class="tr-nota">'+t.nota+'</div>';
+      if(t.estadoCambio) html+='<div style="margin-top:5px;font-size:10px;color:#888">Estado &rarr; <strong>'+t.estadoCambio+'</strong></div>';
+      if(t.tel) html+='<div style="margin-top:5px;font-size:10px;color:#888">Tel: <strong>'+t.tel+'</strong></div>';
+      html+='</div>';
+    });
+  }
+  return html;
 }
-
-// ── TAB BUSQUEDA ──
+// -- TAB BUSQUEDA --
 function renderBusqueda(){
   return `
   <div class="card">
@@ -846,7 +856,7 @@ function ejecutarBusqueda(){
   </tr>`).join('')+'</tbody></table>';
 }
 
-// ── TAB OBS ──
+// -- TAB OBS --
 function renderObs(){
   const c=clienteActivo;
   return `
@@ -871,7 +881,7 @@ function guardarObs(){
   setTimeout(()=>{btn.textContent='Guardar';btn.classList.remove('btn-green');},2000);
 }
 
-// ── TAB DASHBOARD (individual) ──
+// -- TAB DASHBOARD (individual) --
 function renderDashboard(){
   const c=clienteActivo;
   const nTr=(c.tramites||[]).length;
@@ -892,7 +902,7 @@ function renderDashboard(){
     </div></div>`:''}`;
 }
 
-// ── WELCOME ──
+// -- WELCOME --
 function renderWelcome(){
   document.getElementById('mainArea').innerHTML=`
   <div class="tabbar">${TABS_ADMIN.map(t=>`<div class="tb ${tabActiva===t.id?'active':''}" onclick="setTabAdmin('${t.id}')">${t.label}</div>`).join('')}</div>
@@ -906,9 +916,9 @@ function attachEvents(){
   // nada por ahora
 }
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // ACCIONES CLIENTE
-// ═══════════════════════════════════════════════════
+// ===================================================
 function abrirNuevoCliente(){
   editandoCliId=null;
   ['mc-nombre','mc-dni','mc-dom','mc-loc','mc-cp'].forEach(id=>document.getElementById(id).value='');
@@ -968,7 +978,7 @@ function eliminarCliente(){
   clienteActivo=null;renderLista();renderWelcome();cerrarModal('modalCli');
 }
 
-// ── TELÉFONOS / MAILS ──
+// -- TELÉFONOS / MAILS --
 function addTel(){
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].telefonos.push('');
@@ -1006,7 +1016,7 @@ function editMail(i,v){
   saveDB(clienteActivo);
 }
 
-// ── CRÉDITOS ──
+// -- CRÉDITOS --
 function abrirNuevoCredito(){
   editandoCredIdx=null;
   ['cr-prod','cr-com','cr-num','cr-capital'].forEach(id=>document.getElementById(id).value='');
@@ -1068,7 +1078,7 @@ function eliminarCredito(){
   saveDB(clienteActivo);cerrarModal('modalCred');setTabAdmin('cuenta');
 }
 
-// ── PLAN PAGOS ──
+// -- PLAN PAGOS --
 function abrirPlan(i){
   creditoActivoIdx=i;
   document.getElementById('pl-cuotas').value=3;
@@ -1100,8 +1110,12 @@ function toggleCuota(ci,pi){
   saveDB(clienteActivo);setTabAdmin('cuenta');
 }
 
-// ── TRÁMITES ──
+// -- TRÁMITES --
 function abrirTramite(){
+  var estados=DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
+  var opts='<option value="">-- Sin cambio --</option>';
+  estados.forEach(function(e){ opts+='<option>'+e+'</option>'; });
+  document.getElementById('tr-est').innerHTML=opts;
   document.getElementById('tr-nota').value='';
   document.getElementById('tr-tel').value='';
   document.getElementById('tr-est').value='';
@@ -1135,23 +1149,47 @@ function guardarTramite(){
   saveDB(clienteActivo);renderLista();cerrarModal('modalTr');setTabAdmin('tramites');
 }
 
-// ── CONFIG ENTIDADES ──
+// -- CONFIG ENTIDADES --
 function abrirConfig(){
   renderConfigListas();
   document.getElementById('modalConfig').classList.add('open');
 }
 
 function renderConfigListas(){
-  document.getElementById('listEntidades').innerHTML=DB.entidades.map((e,i)=>`
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-      <span style="flex:1;font-size:12px">${e}</span>
-      <button class="btn btn-red btn-sm" onclick="elimEntidad(${i})">✕</button>
-    </div>`).join('');
-  document.getElementById('listCarteras').innerHTML=DB.carteras.map((c,i)=>`
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-      <span style="flex:1;font-size:12px">${c}</span>
-      <button class="btn btn-red btn-sm" onclick="elimCartera(${i})">✕</button>
-    </div>`).join('');
+  document.getElementById('listEntidades').innerHTML=(DB.entidades||[]).map(function(e,i){
+    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+e+'</span><button class="btn btn-red btn-sm" onclick="elimEntidad('+i+')">&#10005;</button></div>';
+  }).join('');
+  document.getElementById('listCarteras').innerHTML=(DB.carteras||[]).map(function(c,i){
+    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+c+'</span><button class="btn btn-red btn-sm" onclick="elimCartera('+i+')">&#10005;</button></div>';
+  }).join('');
+  if(document.getElementById('listEstados')){
+    if(!DB.estados) DB.estados=["Pendiente","En acuerdo","Cancelado","Sin contacto"];
+    document.getElementById('listEstados').innerHTML=DB.estados.map(function(e,i){
+      return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+e+'</span><button class="btn btn-red btn-sm" onclick="elimEstado('+i+')">&#10005;</button></div>';
+    }).join('');
+  }
+}
+function agregarEstado(){
+  if(!DB.estados) DB.estados=["Pendiente","En acuerdo","Cancelado","Sin contacto"];
+  var v=document.getElementById('newEst').value.trim();
+  if(!v) return;
+  DB.estados.push(v);
+  document.getElementById('newEst').value='';
+  saveDBConfig();renderConfigListas();
+}
+function elimEstado(i){
+  if(!DB.estados) return;
+  DB.estados.splice(i,1);
+  saveDBConfig();renderConfigListas();
+}
+function cambiarEstadoCliente(){
+  var nuevoEstado=document.getElementById('est-cli').value;
+  if(!nuevoEstado) return;
+  var idxCli=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
+  DB.clientes[idxCli].estado=nuevoEstado;
+  clienteActivo=DB.clientes[idxCli];
+  saveDB(clienteActivo);
+  renderLista();
 }
 
 function agregarEntidad(){
@@ -1171,9 +1209,9 @@ function agregarCartera(){
 }
 function elimCartera(i){ DB.carteras.splice(i,1); saveDBConfig();renderConfigListas(); }
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // CONSULTAS
-// ═══════════════════════════════════════════════════
+// ===================================================
 function renderConsultas(){
   document.getElementById('mainArea').innerHTML=`
   <div class="tabbar">
@@ -1279,9 +1317,9 @@ function filtrarContacto(){
   }).join('')+'</tbody></table>';
 }
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // HERRAMIENTAS
-// ═══════════════════════════════════════════════════
+// ===================================================
 function renderHerramientas(){
   document.getElementById('mainArea').innerHTML=`
   <div class="tabbar">
@@ -1590,9 +1628,9 @@ function exportarExcelClientes(clientes,filename){
 
 function exportarExcel(){ exportarExcelClientes(DB.clientes,'clientes'); }
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // BACKUP Y RESTAURAR
-// ═══════════════════════════════════════════════════
+// ===================================================
 function hacerBackup(){
   const now = new Date();
   const pad = n => String(n).padStart(2,'0');
@@ -1655,9 +1693,9 @@ function exportarExcel(){
   XLSX.writeFile(wb,'clientes_epsan.xlsx');
 }
 
-// ═══════════════════════════════════════════════════
+// ===================================================
 // UTILS
-// ═══════════════════════════════════════════════════
+// ===================================================
 function cerrarModal(id){ document.getElementById(id).classList.remove('open'); }
 document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
 
