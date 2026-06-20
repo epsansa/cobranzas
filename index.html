@@ -157,6 +157,7 @@ async function cargarDatos(){
       const d=JSON.parse(local);
       Object.assign(window.DB,d);
       if(!window.DB.comercios) window.DB.comercios=[];
+if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
       renderLista();
       if(window.clienteActivo) renderFicha(); else renderWelcome();
     }catch(e){}
@@ -180,6 +181,7 @@ async function cargarDatos(){
       try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
     });
     if(!window.DB.comercios) window.DB.comercios=[];
+if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
 
     window._fbConnected=true;
     actualizarIndicador('ok');
@@ -218,6 +220,7 @@ async function cargarDatos(){
     actualizarIndicador('error');
     // Fallback: usar lo que ya cargamos de localStorage
     if(!window.DB.comercios) window.DB.comercios=[];
+if(!window.DB.estados) window.DB.estados=['Pendiente','En acuerdo','Cancelado','Sin contacto'];
     renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
