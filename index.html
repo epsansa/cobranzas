@@ -501,6 +501,15 @@ a{color:inherit;text-decoration:none}
       </div>
     </div>
   </div>
+    <div>
+      <div class="card-title" style="margin-bottom:8px">Estados</div>
+      <div id="listEstados"></div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <input id="newEst" placeholder="Nuevo estado" style="flex:1;padding:6px 9px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none">
+        <button class="btn btn-dark btn-sm" onclick="agregarEstado()">+</button>
+      </div>
+    </div>
+  </div>
   <div class="btn-row" style="margin-top:14px">
     <button class="btn btn-dark" onclick="cerrarModal('modalConfig');renderLista()">Listo</button>
   </div>
