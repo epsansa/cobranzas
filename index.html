@@ -496,7 +496,8 @@ a{color:inherit;text-decoration:none}
       <div class="card-title" style="margin-bottom:8px">Carteras</div>
       <div id="listCarteras"></div>
       <div style="display:flex;gap:6px;margin-top:8px">
-        <input id="newCar" placeholder="Nueva cartera" style="flex:1;padding:6px 9px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none">
+        <select id="newCarEnt" style="padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:11px;outline:none;margin-bottom:4px;width:100%"><option value="">-- Entidad --</option></select>
+<input id="newCar" placeholder="Nueva cartera"
         <button class="btn btn-dark btn-sm" onclick="agregarCartera()">+</button>
       </div>
     </div>
@@ -670,30 +671,44 @@ function renderAvanzada(){
 }
 
 function aplicarAvanzada(){
-  const ent=document.getElementById('adv-ent').value;
-  const car=document.getElementById('adv-car').value;
-  const est=document.getElementById('adv-est').value;
-  const fil=DB.clientes.filter(c=>{
-    const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
-    const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
-    return enEnt && enCar && (!est||c.estado===est);
-  });
-  const el=document.getElementById('avanzada-resultado');
-  if(!fil.length){el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Sin resultados</div>';return;}
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <span style="font-size:12px;font-weight:600;color:#2557a7">${fil.length} cliente/s encontrado/s</span>
-    <button class="btn btn-green btn-sm" onclick="exportarResultadoAvanzada()">&#128229; Exportar Excel</button>
-  </div>
-  <table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th></tr></thead><tbody>`+
-    fil.map(c=>`<tr onclick="selCliente('${c.id}');setTabAdmin('datos')">
-      <td>${c.nombre||'—'}</td><td>${c.dni||'—'}</td>
-      <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado||'—'}</span></td>
-      <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'—'}</td>
-      <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'—'}</td>
-      <td>${(c.creditos||[]).length}</td>
-    </tr>`).join('')+'</tbody></table>';
-}
+  var ent=document.getElementById('adv-ent').value;
+  var car=document.getElementById('adv-car').value;
+  var est=document.getElementById('adv-est').value;
 
+  // Filtrar carteras según entidad seleccionada
+  var selCar=document.getElementById('adv-car');
+  if(selCar){
+    var carteras=DB.carteras||[];
+    var carsFiltradas=ent
+      ? carteras.filter(function(c){return (typeof c==='object'?c.entidad:'')=== ent;})
+      : carteras;
+    var curVal=selCar.value;
+    selCar.innerHTML='<option value="">Todas</option>'+carsFiltradas.map(function(c){
+      var n=typeof c==='object'?c.nombre:c;
+      return '<option '+(n===curVal?'selected':'')+'>'+n+'</option>';
+    }).join('');
+  }
+
+  var fil=DB.clientes.filter(function(c){
+    var enEnt=!ent||(c.creditos||[]).some(function(x){return x.entidad===ent;})||c.entidad===ent;
+    var enCar=!car||(c.creditos||[]).some(function(x){return x.cartera===car;})||c.cartera===car;
+    return enEnt&&enCar&&(!est||c.estado===est);
+  });
+  var el=document.getElementById('avanzada-resultado');
+  if(!fil.length){el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Sin resultados</div>';return;}
+  el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
+    '<span style="font-size:12px;font-weight:600;color:#2557a7">'+fil.length+' cliente/s encontrado/s</span>'+
+    '<button class="btn btn-green btn-sm" onclick="exportarResultadoAvanzada()">&#128229; Exportar Excel</button>'+
+    '</div>'+
+    '<table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Cr&eacute;ditos</th></tr></thead><tbody>'+
+    fil.map(function(c){return '<tr onclick="selCliente(\''+c.id+'\');setTabAdmin(\'datos\')">'+
+      '<td>'+(c.nombre||'&mdash;')+'</td><td>'+(c.dni||'&mdash;')+'</td>'+
+      '<td><span class="badge '+({'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp')+'">'+( c.estado||'&mdash;')+'</span></td>'+
+      '<td>'+((c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'&mdash;')+'</td>'+
+      '<td>'+((c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'&mdash;')+'</td>'+
+      '<td>'+(c.creditos||[]).length+'</td>'+
+    '</tr>';}).join('')+'</tbody></table>';
+}
 // -- TAB DATOS --
 function renderDatos(){
   const c=clienteActivo;
@@ -1159,7 +1174,12 @@ function guardarTramite(){
 
 // -- CONFIG ENTIDADES --
 function abrirConfig(){
+  // Poblar select de entidades en el input de nueva cartera
   renderConfigListas();
+  var sel=document.getElementById('newCarEnt');
+  if(sel){
+    sel.innerHTML='<option value="">-- Entidad --</option>'+(DB.entidades||[]).map(function(e){return '<option>'+e+'</option>';}).join('');
+  }
   document.getElementById('modalConfig').classList.add('open');
 }
 
@@ -1168,7 +1188,11 @@ function renderConfigListas(){
     return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+e+'</span><button class="btn btn-red btn-sm" onclick="elimEntidad('+i+')">&#10005;</button></div>';
   }).join('');
   document.getElementById('listCarteras').innerHTML=(DB.carteras||[]).map(function(c,i){
-    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+c+'</span><button class="btn btn-red btn-sm" onclick="elimCartera('+i+')">&#10005;</button></div>';
+    var nombre=typeof c==='object'?c.nombre:c;
+    var entidad=typeof c==='object'?c.entidad:'';
+    return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">'+
+      '<span style="flex:1;font-size:12px">'+nombre+' <span style="color:#888;font-size:10px">'+(entidad?'('+entidad+')':'')+'</span></span>'+
+      '<button class="btn btn-red btn-sm" onclick="elimCartera('+i+')">&#10005;</button></div>';
   }).join('');
   if(document.getElementById('listEstados')){
     if(!DB.estados) DB.estados=["Pendiente","En acuerdo","Cancelado","Sin contacto"];
@@ -1209,9 +1233,10 @@ function agregarEntidad(){
 }
 function elimEntidad(i){ DB.entidades.splice(i,1); saveDBConfig();renderConfigListas(); }
 function agregarCartera(){
-  const v=document.getElementById('newCar').value.trim();
-  if(!v)return;
-  DB.carteras.push(v);
+  var v=document.getElementById('newCar').value.trim();
+  var ent=document.getElementById('newCarEnt')?document.getElementById('newCarEnt').value:'';
+  if(!v) return;
+  DB.carteras.push({nombre:v, entidad:ent});
   document.getElementById('newCar').value='';
   saveDBConfig();renderConfigListas();
 }
