@@ -674,12 +674,16 @@ function filtrarCarterasPorEntidad(){
   var selCar=document.getElementById('adv-car');
   var carteras=DB.carteras||[];
   var carsFiltradas=ent
-    ? carteras.filter(function(c){return (typeof c==='object'?c.entidad:c)===ent;})
+    ? carteras.filter(function(c){
+        var n=typeof c==='object'?c.nombre:c;
+        return n.toUpperCase().indexOf(ent.toUpperCase())>=0;
+      })
     : carteras;
   selCar.innerHTML='<option value="">Todas</option>'+carsFiltradas.map(function(c){
     var n=typeof c==='object'?c.nombre:c;
     return '<option>'+n+'</option>';
   }).join('');
+  document.getElementById('adv-car').value='';
   aplicarAvanzada();
 }
 function aplicarAvanzada(){
