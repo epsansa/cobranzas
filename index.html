@@ -681,9 +681,8 @@ function filtrarCarterasPorEntidad(){
     : carteras;
   selCar.innerHTML='<option value="">Todas</option>'+carsFiltradas.map(function(c){
     var n=typeof c==='object'?c.nombre:c;
-    return '<option>'+n+'</option>';
+    return '<option value="'+n+'">'+n+'</option>';
   }).join('');
-  document.getElementById('adv-car').value='';
   aplicarAvanzada();
 }
 function aplicarAvanzada(){
