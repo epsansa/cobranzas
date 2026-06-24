@@ -669,11 +669,12 @@ function filtrarCarterasPorEntidad(){
   if(!ent){
     carsFiltradas=carteras;
   } else {
-    // Usar primera palabra de la entidad para buscar en cartera
-    var palabraEnt=ent.split(' ')[0].toUpperCase();
     carsFiltradas=carteras.filter(function(c){
-      var n=(typeof c==='object'?c.nombre:c).toUpperCase();
-      return n.indexOf(palabraEnt)>=0;
+      var entCartera=typeof c==='object'?c.entidad:'';
+      // Fallback: buscar por texto si no tiene entidad asignada
+      var nombre=typeof c==='object'?c.nombre:c;
+      var palabraEnt=ent.split(' ')[0].toUpperCase();
+      return entCartera===ent || (!entCartera && nombre.toUpperCase().indexOf(palabraEnt)>=0);
     });
   }
   selCar.innerHTML='<option value="">Todas</option>'+carsFiltradas.map(function(c){
@@ -1187,13 +1188,20 @@ function renderConfigListas(){
   document.getElementById('listEntidades').innerHTML=(DB.entidades||[]).map(function(e,i){
     return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span style="flex:1;font-size:12px">'+e+'</span><button class="btn btn-red btn-sm" onclick="elimEntidad('+i+')">&#10005;</button></div>';
   }).join('');
+
   document.getElementById('listCarteras').innerHTML=(DB.carteras||[]).map(function(c,i){
     var nombre=typeof c==='object'?c.nombre:c;
     var entidad=typeof c==='object'?c.entidad:'';
+    var entOpts='<option value="">-- Sin asignar --</option>'+(DB.entidades||[]).map(function(e){
+      return '<option value="'+e+'" '+(entidad===e?'selected':'')+'>'+e+'</option>';
+    }).join('');
     return '<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">'+
-      '<span style="flex:1;font-size:12px">'+nombre+' <span style="color:#888;font-size:10px">'+(entidad?'('+entidad+')':'')+'</span></span>'+
-      '<button class="btn btn-red btn-sm" onclick="elimCartera('+i+')">&#10005;</button></div>';
+      '<span style="flex:1;font-size:12px">'+nombre+'</span>'+
+      '<select onchange="asignarEntidadCartera('+i+',this.value)" style="font-size:11px;padding:3px 5px;border:1px solid #ddd;border-radius:5px;outline:none;max-width:140px">'+entOpts+'</select>'+
+      '<button class="btn btn-red btn-sm" onclick="elimCartera('+i+')">&#10005;</button>'+
+    '</div>';
   }).join('');
+
   if(document.getElementById('listEstados')){
     if(!DB.estados) DB.estados=["Pendiente","En acuerdo","Cancelado","Sin contacto"];
     document.getElementById('listEstados').innerHTML=DB.estados.map(function(e,i){
@@ -1241,7 +1249,14 @@ function agregarCartera(){
   saveDBConfig();renderConfigListas();
 }
 function elimCartera(i){ DB.carteras.splice(i,1); saveDBConfig();renderConfigListas(); }
-
+function asignarEntidadCartera(idx, entidad){
+  if(typeof DB.carteras[idx]==='string'){
+    DB.carteras[idx]={nombre:DB.carteras[idx], entidad:entidad};
+  } else {
+    DB.carteras[idx].entidad=entidad;
+  }
+  saveDBConfig();
+}
 // ===================================================
 // CONSULTAS
 // ===================================================
