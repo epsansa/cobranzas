@@ -658,7 +658,7 @@ function renderAvanzada(){
         <select id="adv-ent" onchange="aplicarAvanzada()"><option value="">Todas</option>${DB.entidades.map(e=>`<option>${e}</option>`).join('')}</select>
       </div>
       <div class="fld"><label>Cartera</label>
-        <select id="adv-car" onchange="aplicarAvanzada()"><option value="">Todas</option>${DB.carteras.map(x=>`<option>${x}</option>`).join('')}</select>
+        <select id="adv-car" onchange="aplicarAvanzada()"><option value="">Todas</option>${(DB.carteras||[]).map(function(x){var n=typeof x==='object'?x.nombre:x;return '<option>'+n+'</option>';}).join('')}</select>
       </div>
       <div class="fld"><label>Estado</label>
         <select id="adv-est" onchange="aplicarAvanzada()">
@@ -669,7 +669,19 @@ function renderAvanzada(){
     <div id="avanzada-resultado"></div>
   </div>`;
 }
-
+function filtrarCarterasPorEntidad(){
+  var ent=document.getElementById('adv-ent').value;
+  var selCar=document.getElementById('adv-car');
+  var carteras=DB.carteras||[];
+  var carsFiltradas=ent
+    ? carteras.filter(function(c){return (typeof c==='object'?c.entidad:c)===ent;})
+    : carteras;
+  selCar.innerHTML='<option value="">Todas</option>'+carsFiltradas.map(function(c){
+    var n=typeof c==='object'?c.nombre:c;
+    return '<option>'+n+'</option>';
+  }).join('');
+  aplicarAvanzada();
+}
 function aplicarAvanzada(){
   var ent=document.getElementById('adv-ent').value;
   var car=document.getElementById('adv-car').value;
