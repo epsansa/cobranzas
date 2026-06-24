@@ -665,12 +665,17 @@ function filtrarCarterasPorEntidad(){
   var ent=document.getElementById('adv-ent').value;
   var selCar=document.getElementById('adv-car');
   var carteras=DB.carteras||[];
-  var carsFiltradas=ent
-    ? carteras.filter(function(c){
-        var n=typeof c==='object'?c.nombre:c;
-        return n.toUpperCase().indexOf(ent.toUpperCase())>=0;
-      })
-    : carteras;
+  var carsFiltradas;
+  if(!ent){
+    carsFiltradas=carteras;
+  } else {
+    // Usar primera palabra de la entidad para buscar en cartera
+    var palabraEnt=ent.split(' ')[0].toUpperCase();
+    carsFiltradas=carteras.filter(function(c){
+      var n=(typeof c==='object'?c.nombre:c).toUpperCase();
+      return n.indexOf(palabraEnt)>=0;
+    });
+  }
   selCar.innerHTML='<option value="">Todas</option>'+carsFiltradas.map(function(c){
     var n=typeof c==='object'?c.nombre:c;
     return '<option value="'+n+'">'+n+'</option>';
