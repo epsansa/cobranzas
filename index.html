@@ -1498,21 +1498,24 @@ function exportarComerciosConsulta(){
 
 function renderHerramientas(){
   document.getElementById('mainArea').innerHTML=`
-  <div class="tabbar">
+  <div class="tabbar" id="herrTabbar">
     <div class="tb active" onclick="setTabHerr('importar',this)">Importar clientes</div>
     <div class="tb" onclick="setTabHerr('exportar',this)">Exportar clientes</div>
     <div class="tb" onclick="setTabHerr('backup',this)">Backup</div>
+    <div class="tb" onclick="setTabHerr('mantenimiento',this)">&#9881; Mantenimiento</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
   renderImportar();
 }
 
 function setTabHerr(tab,el){
-  document.querySelectorAll('.tabbar .tb').forEach(t=>t.classList.remove('active'));
+  const bar=document.getElementById('herrTabbar');
+  if(bar) bar.querySelectorAll('.tb').forEach(t=>t.classList.remove('active'));
   if(el) el.classList.add('active');
   if(tab==='importar') renderImportar();
   else if(tab==='exportar') renderExportar();
-  else renderBackupTab();
+  else if(tab==='backup') renderBackupTab();
+  else renderMantenimiento();
 }
 
 function renderBackupTab(){
@@ -1879,6 +1882,161 @@ document.querySelectorAll('.modal-overlay').forEach(m=>m.addEventListener('click
 renderLista();
 // Cerrar modales con click afuera
 document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
+
+// ═══════════════════════════════════════════════════
+// MANTENIMIENTO — Renombrado masivo de carteras
+// ═══════════════════════════════════════════════════
+function renderMantenimiento(){
+  const el=document.getElementById('herrContent');
+
+  // Calcular preview de qué carteras se renombrarían
+  const reglas = [
+    { entidad: 'SUMAX PREVENTA',          prefijo: 'sumax' },
+    { entidad: 'ECOCRED PREVENTA',        prefijo: 'ecocred' },
+    { entidad: 'PROYECTO 13 PREVENTA',    prefijo: 'proyecto' },
+    { entidad: 'SOFRAN CARDINAL PREVENTA',prefijo: 'sofran cardinal' },
+  ];
+
+  // Detectar carteras afectadas en clientes
+  const afectadas = new Set();
+  DB.clientes.forEach(function(c){
+    (c.creditos||[]).forEach(function(cr){
+      reglas.forEach(function(r){
+        if((cr.entidad||'').toUpperCase()===r.entidad){
+          const car = cr.cartera||'';
+          const partes = car.split('-');
+          const nombre = partes[0].trim().toLowerCase();
+          if(nombre === r.prefijo){
+            afectadas.add(car);
+          }
+        }
+      });
+    });
+  });
+
+  // También revisar DB.carteras
+  const carterasAfectadas = (DB.carteras||[]).filter(function(car){
+    return reglas.some(function(r){
+      const partes = car.split('-');
+      const nombre = partes[0].trim().toLowerCase();
+      return nombre === r.prefijo;
+    });
+  });
+
+  let preview = '';
+  afectadas.forEach(function(car){
+    reglas.forEach(function(r){
+      const partes = car.split('-');
+      const nombre = partes[0].trim().toLowerCase();
+      if(nombre === r.prefijo){
+        const resto = partes.slice(1).join('-');
+        const nuevo = r.prefijo + ' preventa' + (resto ? ' -' + resto : '');
+        // Solo mostrar si realmente cambia
+        if(car.toLowerCase() !== nuevo.toLowerCase()){
+          preview += '<tr><td style="color:#791F1F">'+car+'</td><td style="color:#888">&#8594;</td><td style="color:#27500A;font-weight:600">'+nuevo+'</td></tr>';
+        }
+      }
+    });
+  });
+
+  el.innerHTML =
+    '<div class="card">'+
+      '<div class="card-hdr">'+
+        '<div class="card-title">&#9881; Mantenimiento de carteras</div>'+
+      '</div>'+
+      '<p style="font-size:13px;color:#555;margin-bottom:14px">'+
+        'Esta herramienta renombra masivamente las carteras de las siguientes entidades, '+
+        'agregando <strong>"preventa"</strong> al nombre donde corresponde:<br>'+
+        '<span style="font-size:11px;color:#888">SUMAX PREVENTA &nbsp;·&nbsp; ECOCRED PREVENTA &nbsp;·&nbsp; PROYECTO 13 PREVENTA &nbsp;·&nbsp; SOFRAN CARDINAL PREVENTA</span>'+
+      '</p>'+
+      '<div style="font-size:12px;font-weight:600;margin-bottom:8px;color:#1a3a6b">'+
+        'Cambios que se aplicarán ('+afectadas.size+' carteras afectadas en créditos):'+
+      '</div>'+
+      (preview ?
+        '<div style="overflow-x:auto;margin-bottom:14px">'+
+        '<table class="tbl"><thead><tr><th>Nombre actual</th><th></th><th>Nombre nuevo</th></tr></thead>'+
+        '<tbody>'+preview+'</tbody></table></div>'
+        : '<div style="color:#aaa;font-size:12px;margin-bottom:14px">No se detectaron carteras para renombrar.</div>'
+      )+
+      (preview ?
+        '<div style="display:flex;gap:8px">'+
+          '<button class="btn btn-dark" onclick="ejecutarRenombradoCarteras()">&#10003; Aplicar cambios</button>'+
+          '<button class="btn btn-outline" onclick="renderMantenimiento()">&#8635; Actualizar preview</button>'+
+        '</div>'
+        : '<button class="btn btn-outline" onclick="renderMantenimiento()">&#8635; Actualizar</button>'
+      )+
+    '</div>';
+}
+
+function ejecutarRenombradoCarteras(){
+  if(!confirm('Confirmar renombrado masivo de carteras? Esta acción modifica todos los créditos afectados y se guardará en la nube.')) return;
+
+  const reglas = [
+    { entidad: 'SUMAX PREVENTA',          prefijo: 'sumax' },
+    { entidad: 'ECOCRED PREVENTA',        prefijo: 'ecocred' },
+    { entidad: 'PROYECTO 13 PREVENTA',    prefijo: 'proyecto' },
+    { entidad: 'SOFRAN CARDINAL PREVENTA',prefijo: 'sofran cardinal' },
+  ];
+
+  function renombrar(car, entidad){
+    var r = reglas.find(function(r){ return r.entidad === (entidad||'').toUpperCase(); });
+    if(!r) return car;
+    var partes = car.split('-');
+    var nombre = partes[0].trim().toLowerCase();
+    if(nombre !== r.prefijo) return car;
+    var resto = partes.slice(1).join('-');
+    return r.prefijo + ' preventa' + (resto ? ' -' + resto : '');
+  }
+
+  var cambiados = 0;
+
+  // Renombrar en créditos de clientes
+  DB.clientes.forEach(function(c){
+    (c.creditos||[]).forEach(function(cr){
+      var nuevo = renombrar(cr.cartera||'', cr.entidad||c.entidad||'');
+      if(nuevo !== (cr.cartera||'')){
+        cr.cartera = nuevo;
+        cambiados++;
+      }
+    });
+    // También campo raíz si existe
+    if(c.cartera){
+      // Para cartera raíz buscamos la entidad del primer crédito o la propia
+      var entRef = (c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'';
+      var nuevo = renombrar(c.cartera, entRef);
+      if(nuevo !== c.cartera){ c.cartera = nuevo; cambiados++; }
+    }
+  });
+
+  // Renombrar en DB.carteras (lista global)
+  DB.carteras = (DB.carteras||[]).map(function(car){
+    // Para carteras globales probamos con todas las reglas
+    var result = car;
+    reglas.forEach(function(r){
+      var partes = car.split('-');
+      var nombre = partes[0].trim().toLowerCase();
+      if(nombre === r.prefijo){
+        var resto = partes.slice(1).join('-');
+        result = r.prefijo + ' preventa' + (resto ? ' -' + resto : '');
+      }
+    });
+    return result;
+  });
+  // Eliminar duplicados en DB.carteras
+  DB.carteras = [...new Set(DB.carteras)];
+
+  saveDB();
+  renderLista();
+
+  const el=document.getElementById('herrContent');
+  el.innerHTML =
+    '<div class="card" style="border-left:4px solid #27500A">'+
+      '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado</div>'+
+      '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados y guardados en la nube.</p>'+
+      '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
+    '</div>';
+}
+
 </script>
 </body>
 </html>
