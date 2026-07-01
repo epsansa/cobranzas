@@ -1930,7 +1930,8 @@ function renderMantenimiento(){
       const nombre = partes[0].trim().toLowerCase();
       if(nombre === r.prefijo){
         const resto = partes.slice(1).join('-');
-        const nuevo = r.prefijo + ' preventa' + (resto ? ' -' + resto : '');
+        const nombreOrig = partes[0].trim().toUpperCase();
+        const nuevo = nombreOrig + ' PREVENTA' + (resto ? ' -' + resto : '');
         // Solo mostrar si realmente cambia
         if(car.toLowerCase() !== nuevo.toLowerCase()){
           preview += '<tr><td style="color:#791F1F">'+car+'</td><td style="color:#888">&#8594;</td><td style="color:#27500A;font-weight:600">'+nuevo+'</td></tr>';
@@ -1985,7 +1986,9 @@ function ejecutarRenombradoCarteras(){
     var nombre = partes[0].trim().toLowerCase();
     if(nombre !== r.prefijo) return car;
     var resto = partes.slice(1).join('-');
-    return r.prefijo + ' preventa' + (resto ? ' -' + resto : '');
+    // Mantener el nombre original en mayúsculas + agregar PREVENTA
+    var nombreOrig = partes[0].trim().toUpperCase();
+    return nombreOrig + ' PREVENTA' + (resto ? ' -' + resto : '');
   }
 
   var cambiados = 0;
@@ -2017,7 +2020,8 @@ function ejecutarRenombradoCarteras(){
       var nombre = partes[0].trim().toLowerCase();
       if(nombre === r.prefijo){
         var resto = partes.slice(1).join('-');
-        result = r.prefijo + ' preventa' + (resto ? ' -' + resto : '');
+        var nombreOrig = partes[0].trim().toUpperCase();
+        result = nombreOrig + ' PREVENTA' + (resto ? ' -' + resto : '');
       }
     });
     return result;
