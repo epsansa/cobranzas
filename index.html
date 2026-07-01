@@ -648,20 +648,23 @@ function renderTab(){
 
 // -- TAB AVANZADA --
 function renderAvanzada(){
-  const c=clienteActivo;
-  const ents=DB.entidades.map(e=>`<option ${(c&&c.entidad===e)?'selected':''}>${e}</option>`).join('');
-  const cars=DB.carteras.map(x=>`<option ${(c&&c.cartera===x)?'selected':''}>${x}</option>`).join('');
   return `
   <div class="card">
     <div class="card-hdr"><div class="card-title">Filtros avanzados</div>
-      <button class="btn btn-outline btn-sm" onclick="abrirConfig()">⚙️ Config entidades</button>
+      <button class="btn btn-outline btn-sm" onclick="abrirConfig()">&#9881;&#65039; Config entidades</button>
     </div>
     <div class="adv-filters">
       <div class="fld"><label>Entidad</label>
-        <select id="adv-ent" onchange="aplicarAvanzada()"><option value="">Todas</option>${DB.entidades.map(e=>`<option>${e}</option>`).join('')}</select>
+        <select id="adv-ent" onchange="filtrarCarterasPorEntidad();aplicarAvanzada()">
+          <option value="">Todas</option>
+          ${DB.entidades.map(e=>'<option>'+e+'</option>').join('')}
+        </select>
       </div>
       <div class="fld"><label>Cartera</label>
-        <select id="adv-car" onchange="aplicarAvanzada()"><option value="">Todas</option>${DB.carteras.map(x=>`<option>${x}</option>`).join('')}</select>
+        <select id="adv-car" onchange="aplicarAvanzada()">
+          <option value="">Todas</option>
+          ${DB.carteras.map(x=>'<option>'+x+'</option>').join('')}
+        </select>
       </div>
       <div class="fld"><label>Estado</label>
         <select id="adv-est" onchange="aplicarAvanzada()">
@@ -671,6 +674,42 @@ function renderAvanzada(){
     </div>
     <div id="avanzada-resultado"></div>
   </div>`;
+}
+
+function filtrarCarterasPorEntidad(){
+  const ent = document.getElementById('adv-ent').value;
+  const selCar = document.getElementById('adv-car');
+  if(!selCar) return;
+  const valorActual = selCar.value;
+
+  // Si no hay entidad seleccionada, mostrar todas las carteras
+  if(!ent){
+    selCar.innerHTML = '<option value="">Todas</option>' +
+      DB.carteras.map(function(x){ return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>'; }).join('');
+    return;
+  }
+
+  // Obtener carteras que tienen clientes en esa entidad
+  const carterasDeEntidad = new Set();
+  DB.clientes.forEach(function(c){
+    (c.creditos||[]).forEach(function(cr){
+      if((cr.entidad||c.entidad||'') === ent && cr.cartera){
+        carterasDeEntidad.add(cr.cartera);
+      }
+    });
+    if((c.entidad||'') === ent && c.cartera) carterasDeEntidad.add(c.cartera);
+  });
+
+  // También incluir carteras de DB.carteras que empiecen igual (por si no hay clientes aún)
+  const prefijo = ent.split(' ')[0].toLowerCase();
+  DB.carteras.forEach(function(x){
+    if(x.toLowerCase().startsWith(prefijo)) carterasDeEntidad.add(x);
+  });
+
+  const sorted = [...carterasDeEntidad].sort();
+
+  selCar.innerHTML = '<option value="">Todas de '+ent+'</option>' +
+    sorted.map(function(x){ return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>'; }).join('');
 }
 
 function aplicarAvanzada(){
