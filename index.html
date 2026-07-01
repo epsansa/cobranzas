@@ -391,7 +391,6 @@ a{color:inherit;text-decoration:none}
     <select class="filter-sel" id="fCar" onchange="renderLista()"><option value="">Todas las carteras</option></select>
     <select class="filter-sel" id="fEst" onchange="renderLista()">
       <option value="">Todos los estados</option>
-      <option>Pendiente</option><option>En acuerdo</option><option>Cancelado</option><option>Sin contacto</option>
     </select>
   </div>
   <div class="lp-list" id="clientList"></div>
@@ -549,9 +548,30 @@ function setMod(mod, el){
 function renderLista(){
   // Poblar selects
   poblarSelect('fEnt', DB.entidades, 'Todas las entidades');
-  poblarSelect('fCar', DB.carteras, 'Todas las carteras');
-  const q=(document.getElementById('srchInput').value||'').toLowerCase();
+  // Poblar estados dinámicamente desde DB.estados
+  const fEstActual=document.getElementById('fEst').value;
+  const estados=DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
+  const selEst=document.getElementById('fEst');
+  selEst.innerHTML='<option value="">Todos los estados</option>'+
+    estados.map(e=>'<option'+(e===fEstActual?' selected':'')+'>'+e+'</option>').join('');
+  // Carteras: si hay entidad seleccionada, mostrar solo las de esa entidad
   const fEnt=document.getElementById('fEnt').value;
+  if(fEnt){
+    const carterasEnt=new Set();
+    DB.clientes.forEach(function(c){
+      (c.creditos||[]).forEach(function(cr){
+        if((cr.entidad||c.entidad||'')===fEnt && cr.cartera) carterasEnt.add(cr.cartera);
+      });
+      if((c.entidad||'')===fEnt && c.cartera) carterasEnt.add(c.cartera);
+    });
+    const fCarActual=document.getElementById('fCar').value;
+    const selCar=document.getElementById('fCar');
+    selCar.innerHTML='<option value="">Todas las carteras</option>'+
+      [...carterasEnt].sort().map(x=>'<option'+(x===fCarActual?' selected':'')+'>'+x+'</option>').join('');
+  } else {
+    poblarSelect('fCar', DB.carteras, 'Todas las carteras');
+  }
+  const q=(document.getElementById('srchInput').value||'').toLowerCase();
   const fCar=document.getElementById('fCar').value;
   const fEst=document.getElementById('fEst').value;
 
