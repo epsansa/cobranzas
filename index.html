@@ -2065,8 +2065,13 @@ function ejecutarRenombradoCarteras(){
     });
     return result;
   });
-  // Eliminar duplicados en DB.carteras
-  DB.carteras = [...new Set(DB.carteras)];
+  // Reconstruir DB.carteras solo con los nombres actuales (elimina los viejos)
+  const todasCarteras = new Set();
+  DB.clientes.forEach(function(c){
+    (c.creditos||[]).forEach(function(cr){ if(cr.cartera) todasCarteras.add(cr.cartera); });
+    if(c.cartera) todasCarteras.add(c.cartera);
+  });
+  DB.carteras = [...todasCarteras].sort();
 
   saveDB();
   renderLista();
