@@ -2018,14 +2018,16 @@ function ejecutarRenombradoCarteras(){
     { entidad: 'SOFRAN CARDINAL PREVENTA',prefijo: 'sofran cardinal' },
   ];
 
-  function renombrar(car, entidad){
-    var r = reglas.find(function(r){ return r.entidad === (entidad||'').toUpperCase(); });
-    if(!r) return car;
+  function renombrar(car){
+    if(!car) return car;
+    // Renombrar por prefijo de cartera, sin depender de la entidad
     var partes = car.split('-');
     var nombre = partes[0].trim().toLowerCase();
-    if(nombre !== r.prefijo) return car;
     var resto = partes.slice(1).join('-');
-    // Mantener el nombre original en mayúsculas + agregar PREVENTA
+    var r = reglas.find(function(r){ return nombre === r.prefijo; });
+    if(!r) return car;
+    // Ya tiene PREVENTA — no renombrar de nuevo
+    if(nombre.indexOf('preventa') !== -1) return car;
     var nombreOrig = partes[0].trim().toUpperCase();
     return nombreOrig + ' PREVENTA' + (resto ? ' -' + resto : '');
   }
@@ -2035,7 +2037,7 @@ function ejecutarRenombradoCarteras(){
   // Renombrar en créditos de clientes
   DB.clientes.forEach(function(c){
     (c.creditos||[]).forEach(function(cr){
-      var nuevo = renombrar(cr.cartera||'', cr.entidad||c.entidad||'');
+      var nuevo = renombrar(cr.cartera||'');
       if(nuevo !== (cr.cartera||'')){
         cr.cartera = nuevo;
         cambiados++;
@@ -2045,7 +2047,7 @@ function ejecutarRenombradoCarteras(){
     if(c.cartera){
       // Para cartera raíz buscamos la entidad del primer crédito o la propia
       var entRef = (c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'';
-      var nuevo = renombrar(c.cartera, entRef);
+      var nuevo = renombrar(c.cartera);
       if(nuevo !== c.cartera){ c.cartera = nuevo; cambiados++; }
     }
   });
