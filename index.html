@@ -272,7 +272,7 @@ a{color:inherit;text-decoration:none}
 .body{display:flex;flex:1;overflow:hidden}
 .leftpanel{width:260px;background:#fff;border-right:1px solid #c8d8ec;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
 .leftpanel .lp-header{padding:10px;border-bottom:2px solid #dce8f5;background:linear-gradient(180deg,#e8f2fc 0%,#f4f8fd 100%);flex-shrink:0}
-.search-box{width:100%;padding:7px 10px;border:1px solid #b8cfe8;border-radius:8px;font-size:12px;outline:none;background:#fff}
+.search-box{width:100%;padding:7px 10px;border:1px solid #b8cfe8;border-radius:8px;font-size:12px;outline:none;background:#fff;caret-color:#2557a7}
 .search-box:focus{border-color:#2557a7;box-shadow:0 0 0 2px rgba(37,87,167,.1)}
 .filter-sel{width:100%;padding:5px 8px;border:1px solid #c8d8ec;border-radius:6px;font-size:11px;outline:none;background:#fff;margin-top:5px}
 .lp-list{flex:1;overflow-y:auto}
@@ -386,7 +386,7 @@ a{color:inherit;text-decoration:none}
 <div class="body">
 <div class="leftpanel" id="leftPanel">
   <div class="lp-header">
-    <input class="search-box" id="srchInput" placeholder="Nombre, DNI, tel, mail, cr&#233;dito..." oninput="buscarLista()" onkeydown="if(event.key==='Enter')irPrimerResultado()">
+    <input class="search-box" id="srchInput" placeholder="Nombre, DNI, tel, mail, cr&#233;dito..." oninput="buscarLista()" onkeydown="if(event.key==='Enter')irPrimerResultado()" onclick="this.select()" autocomplete="off" style="caret-color:#2557a7">
     <select class="filter-sel" id="fEnt" onchange="renderLista()"><option value="">Todas las entidades</option></select>
     <select class="filter-sel" id="fCar" onchange="renderLista()"><option value="">Todas las carteras</option></select>
     <select class="filter-sel" id="fEst" onchange="renderLista()">
@@ -688,7 +688,8 @@ function renderAvanzada(){
       </div>
       <div class="fld"><label>Estado</label>
         <select id="adv-est" onchange="aplicarAvanzada()">
-          <option value="">Todos</option><option>Pendiente</option><option>En acuerdo</option><option>Cancelado</option><option>Sin contacto</option>
+          <option value="">Todos</option>
+          ${(DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto']).map(e=>'<option>'+e+'</option>').join('')}
         </select>
       </div>
     </div>
