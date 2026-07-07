@@ -1563,6 +1563,7 @@ function renderHerramientas(){
     <div class="tb" onclick="setTabHerr('exportar',this)">Exportar clientes</div>
     <div class="tb" onclick="setTabHerr('backup',this)">Backup</div>
     <div class="tb" onclick="setTabHerr('mantenimiento',this)">&#9881; Mantenimiento</div>
+    <div class="tb" onclick="setTabHerr('importtel',this)">&#128222; Importar Tel/Trámites</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
   renderImportar();
@@ -1575,6 +1576,7 @@ function setTabHerr(tab,el){
   if(tab==='importar') renderImportar();
   else if(tab==='exportar') renderExportar();
   else if(tab==='backup') renderBackupTab();
+  else if(tab==='importtel') renderImportarTelTramites();
   else renderMantenimiento();
 }
 
@@ -1946,6 +1948,174 @@ document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListe
 // ═══════════════════════════════════════════════════
 // MANTENIMIENTO — Renombrado masivo de carteras
 // ═══════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════
+// IMPORTAR TELÉFONOS Y TRÁMITES DESDE EXCEL
+// ═══════════════════════════════════════════════════
+function renderImportarTelTramites(){
+  const el=document.getElementById('herrContent');
+  el.innerHTML=
+    '<div class="card">'+
+      '<div class="card-hdr">'+
+        '<div class="card-title">&#128222; Importar teléfonos y trámites</div>'+
+      '</div>'+
+      '<p style="font-size:12px;color:#666;margin-bottom:12px">'+
+        'El archivo Excel debe contener las columnas: <strong>dni</strong>, <strong>nombre</strong>, <strong>telefono</strong>, <strong>tramite</strong>.<br>'+
+        'Solo se actualizan clientes que ya existen en la base. El trámite se registra con estado <strong>Importante</strong> y fecha de hoy.'+
+      '</p>'+
+      '<div class="dropzone" id="dz-tel" onclick="document.getElementById(\'inp-tel\').click()" '+
+        'ondragover="event.preventDefault();this.style.borderColor=\'#2557a7\'" '+
+        'ondragleave="this.style.borderColor=\'\'" '+
+        'ondrop="event.preventDefault();this.style.borderColor=\'\';procesarArchivoTelTramites(event.dataTransfer.files[0])">'+
+        '&#128222; Arrastrá el archivo Excel aquí o hacé click para seleccionar'+
+      '</div>'+
+      '<input type="file" id="inp-tel" accept=".xlsx,.xls,.csv" style="display:none" onchange="procesarArchivoTelTramites(this.files[0])">'+
+      '<div id="tel-preview" style="margin-top:14px"></div>'+
+    '</div>';
+}
+
+function procesarArchivoTelTramites(file){
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const rows=XLSX.utils.sheet_to_json(ws,{raw:false,defval:''});
+
+      if(!rows.length){ mostrarPreviewTel('<div style="color:#aaa">El archivo está vacío</div>'); return; }
+
+      // Normalizar claves a minúsculas
+      const data=rows.map(function(r){
+        const n={};
+        Object.keys(r).forEach(function(k){ n[k.toLowerCase().trim()]=String(r[k]).trim(); });
+        return n;
+      });
+
+      // Verificar columnas mínimas
+      const keys=Object.keys(data[0]);
+      if(!keys.includes('dni')){ mostrarPreviewTel('<div style="color:#c00">El archivo no tiene columna <strong>dni</strong></div>'); return; }
+
+      // Procesar y matchear con DB
+      const hoy=new Date().toISOString().slice(0,10);
+      const horaFecha=new Date().toLocaleString('es-AR');
+      const resultados=[];
+
+      data.forEach(function(r){
+        const dniRaw=(r.dni||'').replace(/\./g,'').trim();
+        const nombre=r.nombre||'';
+        const tel=(r.telefono||r.tel||r.celular||'').trim();
+        const tramiteNota=(r.tramite||r.tramites||r.gestion||'').trim();
+
+        if(!dniRaw){ resultados.push({dni:dniRaw,nombre,tel,tramiteNota,estado:'ignorado',motivo:'DNI vacío'}); return; }
+
+        const cliente=DB.clientes.find(function(c){
+          return (c.dni||'').replace(/\./g,'').trim()===dniRaw;
+        });
+
+        if(!cliente){
+          resultados.push({dni:dniRaw,nombre,tel,tramiteNota,estado:'no_encontrado',motivo:'DNI no existe en la base'});
+          return;
+        }
+
+        resultados.push({dni:dniRaw,nombre:cliente.nombre,tel,tramiteNota,estado:'encontrado',motivo:'',cliente});
+      });
+
+      const encontrados=resultados.filter(function(r){return r.estado==='encontrado';});
+      const noEncontrados=resultados.filter(function(r){return r.estado==='no_encontrado';});
+
+      // Mostrar preview
+      let html=
+        '<div style="display:flex;gap:16px;margin-bottom:12px;font-size:12px">'+
+          '<span style="color:#27500A;font-weight:600">&#10003; '+encontrados.length+' clientes encontrados</span>'+
+          (noEncontrados.length?'<span style="color:#888">&#10007; '+noEncontrados.length+' DNI no encontrados (se ignorarán)</span>':'')+
+        '</div>';
+
+      if(encontrados.length){
+        html+='<div style="overflow-x:auto;margin-bottom:12px">'+
+          '<table class="tbl"><thead><tr>'+
+            '<th>DNI</th><th>Nombre</th><th>Teléfono</th><th>Trámite a registrar</th>'+
+          '</tr></thead><tbody>'+
+          encontrados.map(function(r){
+            return '<tr>'+
+              '<td>'+r.dni+'</td>'+
+              '<td>'+r.nombre+'</td>'+
+              '<td style="color:'+(r.tel?'#27500A':'#aaa')+'">'+(r.tel||'—')+'</td>'+
+              '<td style="color:'+(r.tramiteNota?'inherit':'#aaa')+'">'+(r.tramiteNota||'—')+'</td>'+
+            '</tr>';
+          }).join('')+
+          '</tbody></table></div>';
+
+        html+='<button class="btn btn-dark" onclick="aplicarImportTelTramites()">&#10003; Aplicar a '+encontrados.length+' clientes</button>';
+      } else {
+        html+='<div style="color:#aaa;font-size:12px">No se encontró ningún DNI en la base.</div>';
+      }
+
+      // Guardar resultados en window para aplicar después
+      window._importTelData=resultados;
+      mostrarPreviewTel(html);
+
+    }catch(e){
+      mostrarPreviewTel('<div style="color:#c00">Error al leer el archivo: '+e.message+'</div>');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function mostrarPreviewTel(html){
+  const el=document.getElementById('tel-preview');
+  if(el) el.innerHTML=html;
+}
+
+function aplicarImportTelTramites(){
+  const data=(window._importTelData||[]).filter(function(r){return r.estado==='encontrado';});
+  if(!data.length){ alert('Sin datos para aplicar'); return; }
+
+  const horaFecha=new Date().toLocaleString('es-AR');
+  let aplicados=0;
+
+  data.forEach(function(r){
+    const c=r.cliente;
+    if(!c) return;
+
+    // Agregar teléfono si tiene y no está repetido
+    if(r.tel){
+      if(!c.telefonos) c.telefonos=[];
+      if(!c.telefonos.includes(r.tel)) c.telefonos.push(r.tel);
+    }
+
+    // Registrar trámite si tiene nota
+    if(r.tramiteNota){
+      if(!c.tramites) c.tramites=[];
+      // Estado: si estaba Pendiente pasa a Importante, sino respeta el estado actual
+      if(c.estado==='Pendiente') c.estado='Importante';
+      c.tramites.push({
+        tipo:'Importante',
+        fechaHora:horaFecha,
+        nota:r.tramiteNota,
+        user:''
+      });
+    }
+
+    aplicados++;
+  });
+
+  saveDB();
+  renderLista();
+  if(clienteActivo){
+    const actualizado=DB.clientes.find(function(c){return c.id===clienteActivo.id;});
+    if(actualizado){ clienteActivo=actualizado; renderFicha(); }
+  }
+
+  mostrarPreviewTel(
+    '<div class="card" style="border-left:4px solid #27500A;margin-top:8px">'+
+      '<div class="card-title" style="color:#27500A;margin-bottom:6px">&#10003; Importación completada</div>'+
+      '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados con teléfonos y/o trámites.</p>'+
+      '<button class="btn btn-outline" style="margin-top:10px" onclick="renderImportarTelTramites()">Nueva importación</button>'+
+    '</div>'
+  );
+}
+
 function renderMantenimiento(){
   const el=document.getElementById('herrContent');
 
