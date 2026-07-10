@@ -146,9 +146,9 @@ window.importarMasivo=async function(clientes,reemplazar){
 // -- GUARDAR MÚLTIPLES CLIENTES EN FIRESTORE (para mantenimiento e importaciones masivas) --
 window.saveMuchos=async function(clientes, config){
   // clientes: array de clientes a guardar. config: true si también guardar config
-  actualizarIndicador('guardando');
+  console.log('[saveMuchos] Guardando', clientes.length, 'clientes en Firestore...');
+  actualizarIndicador('guardando', clientes.length+' docs');
   window._fbSaving=true;
-  // NO cancelar _saveTimer — es variable local del módulo
   try {
     const BSIZ=450;
     for(let i=0;i<clientes.length;i+=BSIZ){
@@ -2134,7 +2134,7 @@ function aplicarImportTelTramites(){
 
   // Guardar todos los clientes modificados en Firestore de forma masiva
   const clientesModificados=data.map(function(r){return r.cliente;}).filter(Boolean);
-  mostrarPreviewTel('<div style="color:#2557a7;font-size:12px">&#128190; Guardando '+clientesModificados.length+' clientes en la nube...</div>');
+  mostrarPreviewTel('<div style="color:#2557a7;font-size:12px">&#128190; Guardando <strong>'+clientesModificados.length+'</strong> clientes en la nube (esto puede tomar unos segundos)...</div>');
 
   // Guardar con retry si saveMuchos aún no está disponible
   function doSave(intentos){
@@ -2280,23 +2280,24 @@ function ejecutarRenombradoCarteras(){
   }
 
   var cambiados = 0;
+  var clientesModificados = [];
 
-  // Renombrar en créditos de clientes
+  // Renombrar en créditos de clientes — registrar solo los que cambian
   DB.clientes.forEach(function(c){
+    var modificado = false;
     (c.creditos||[]).forEach(function(cr){
       var nuevo = renombrar(cr.cartera||'');
       if(nuevo !== (cr.cartera||'')){
         cr.cartera = nuevo;
         cambiados++;
+        modificado = true;
       }
     });
-    // También campo raíz si existe
     if(c.cartera){
-      // Para cartera raíz buscamos la entidad del primer crédito o la propia
-      var entRef = (c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'';
       var nuevo = renombrar(c.cartera);
-      if(nuevo !== c.cartera){ c.cartera = nuevo; cambiados++; }
+      if(nuevo !== c.cartera){ c.cartera = nuevo; cambiados++; modificado = true; }
     }
+    if(modificado) clientesModificados.push(c);
   });
 
   // Renombrar en DB.carteras (lista global)
@@ -2324,17 +2325,21 @@ function ejecutarRenombradoCarteras(){
 
   // Guardar en Firestore: todos los clientes afectados + config (carteras actualizadas)
   const el=document.getElementById('herrContent');
-  el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px">&#128190; Guardando cambios en la nube...</div>';
+  el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px">&#128190; Guardando <strong>'+clientesModificados.length+'</strong> clientes modificados en la nube...</div>';
 
-  const todosClientes=DB.clientes.slice(); // copia del array actual
+  // Solo guardar los clientes que realmente cambiaron + config de carteras
+  console.log('Clientes modificados:', clientesModificados.length, 'de', DB.clientes.length);
   function doSaveRename(intentos){
     if(typeof window.saveMuchos === 'function'){
-      window.saveMuchos(todosClientes, true).then(function(ok){
+      window.saveMuchos(clientesModificados, true).then(function(ok){
         renderLista();
         el.innerHTML=
           '<div class="card" style="border-left:4px solid #27500A">'+
             '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado y guardado en la nube</div>'+
-            '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados.</p>'+
+            '<p style="font-size:13px;color:#555">'+
+              '<strong>'+clientesModificados.length+'</strong> clientes actualizados &nbsp;·&nbsp; '+
+              '<strong>'+cambiados+'</strong> créditos renombrados.'+
+            '</p>'+
             '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
           '</div>';
       });
