@@ -2323,12 +2323,24 @@ function ejecutarRenombradoCarteras(){
   });
   DB.carteras = [...todasCarteras].sort();
 
-  // Guardar en Firestore: todos los clientes afectados + config (carteras actualizadas)
+  // Guardar en Firestore: solo los clientes que cambiaron + config (carteras actualizadas)
   const el=document.getElementById('herrContent');
+
+  // Corte anticipado si no hay nada que guardar
+  if(!clientesModificados.length){
+    actualizarIndicador('ok');
+    if(typeof window._fbSaving !== 'undefined') window._fbSaving=false;
+    el.innerHTML=
+      '<div class="card" style="border-left:4px solid #2557a7">'+
+        '<div class="card-title" style="color:#2557a7;margin-bottom:8px">&#10003; Sin cambios pendientes</div>'+
+        '<p style="font-size:13px;color:#555">No se encontraron carteras para renombrar. Ya están todas actualizadas.</p>'+
+        '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
+      '</div>';
+    return;
+  }
+
   el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px">&#128190; Guardando <strong>'+clientesModificados.length+'</strong> clientes modificados en la nube...</div>';
 
-  // Solo guardar los clientes que realmente cambiaron + config de carteras
-  console.log('Clientes modificados:', clientesModificados.length, 'de', DB.clientes.length);
   function doSaveRename(intentos){
     if(typeof window.saveMuchos === 'function'){
       window.saveMuchos(clientesModificados, true).then(function(ok){
@@ -2337,7 +2349,7 @@ function ejecutarRenombradoCarteras(){
           '<div class="card" style="border-left:4px solid #27500A">'+
             '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado y guardado en la nube</div>'+
             '<p style="font-size:13px;color:#555">'+
-              '<strong>'+clientesModificados.length+'</strong> clientes actualizados &nbsp;·&nbsp; '+
+              '<strong>'+clientesModificados.length+'</strong> clientes actualizados &nbsp;&middot;&nbsp; '+
               '<strong>'+cambiados+'</strong> créditos renombrados.'+
             '</p>'+
             '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
