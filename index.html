@@ -143,6 +143,38 @@ window.importarMasivo=async function(clientes,reemplazar){
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
 };
 
+// -- GUARDAR MÚLTIPLES CLIENTES EN FIRESTORE (para mantenimiento e importaciones masivas) --
+window.saveMuchos=async function(clientes, config){
+  // clientes: array de clientes a guardar. config: true si también guardar config
+  actualizarIndicador('guardando');
+  window._fbSaving=true;
+  clearTimeout(_saveTimer);
+  try {
+    const BSIZ=450;
+    for(let i=0;i<clientes.length;i+=BSIZ){
+      const b=writeBatch(db_fs);
+      clientes.slice(i,i+BSIZ).forEach(c=>{
+        b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()});
+      });
+      await b.commit();
+    }
+    if(config){
+      await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
+    }
+    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+    window._fbLastSave=new Date();
+    window._fbSaving=false;
+    actualizarIndicador('ok');
+    return true;
+  } catch(e){
+    console.error('Error saveMuchos:',e);
+    mostrarError('Error al guardar: '+e.message);
+    window._fbSaving=false;
+    actualizarIndicador('error');
+    return false;
+  }
+};
+
 // -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
@@ -2100,20 +2132,37 @@ function aplicarImportTelTramites(){
     aplicados++;
   });
 
-  saveDB();
-  renderLista();
-  if(clienteActivo){
-    const actualizado=DB.clientes.find(function(c){return c.id===clienteActivo.id;});
-    if(actualizado){ clienteActivo=actualizado; renderFicha(); }
-  }
+  // Guardar todos los clientes modificados en Firestore de forma masiva
+  const clientesModificados=data.map(function(r){return r.cliente;}).filter(Boolean);
+  mostrarPreviewTel('<div style="color:#2557a7;font-size:12px">&#128190; Guardando '+clientesModificados.length+' clientes en la nube...</div>');
 
-  mostrarPreviewTel(
-    '<div class="card" style="border-left:4px solid #27500A;margin-top:8px">'+
-      '<div class="card-title" style="color:#27500A;margin-bottom:6px">&#10003; Importación completada</div>'+
-      '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados con teléfonos y/o trámites.</p>'+
-      '<button class="btn btn-outline" style="margin-top:10px" onclick="renderImportarTelTramites()">Nueva importación</button>'+
-    '</div>'
-  );
+  if(typeof window.saveMuchos === 'function'){
+    window.saveMuchos(clientesModificados, false).then(function(ok){
+      renderLista();
+      if(clienteActivo){
+        const actualizado=DB.clientes.find(function(c){return c.id===clienteActivo.id;});
+        if(actualizado){ clienteActivo=actualizado; renderFicha(); }
+      }
+      mostrarPreviewTel(
+        '<div class="card" style="border-left:4px solid #27500A;margin-top:8px">'+
+          '<div class="card-title" style="color:#27500A;margin-bottom:6px">&#10003; Importación completada y guardada</div>'+
+          '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados con teléfonos y/o trámites.</p>'+
+          '<button class="btn btn-outline" style="margin-top:10px" onclick="renderImportarTelTramites()">Nueva importación</button>'+
+        '</div>'
+      );
+    });
+  } else {
+    // Fallback si Firebase aún no cargó
+    saveDB();
+    renderLista();
+    mostrarPreviewTel(
+      '<div class="card" style="border-left:4px solid #27500A;margin-top:8px">'+
+        '<div class="card-title" style="color:#27500A;margin-bottom:6px">&#10003; Importación completada</div>'+
+        '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados.</p>'+
+        '<button class="btn btn-outline" style="margin-top:10px" onclick="renderImportarTelTramites()">Nueva importación</button>'+
+      '</div>'
+    );
+  }
 }
 
 function renderMantenimiento(){
@@ -2266,16 +2315,30 @@ function ejecutarRenombradoCarteras(){
   });
   DB.carteras = [...todasCarteras].sort();
 
-  saveDB();
-  renderLista();
-
+  // Guardar en Firestore: todos los clientes afectados + config (carteras actualizadas)
   const el=document.getElementById('herrContent');
-  el.innerHTML =
-    '<div class="card" style="border-left:4px solid #27500A">'+
-      '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado</div>'+
-      '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados y guardados en la nube.</p>'+
-      '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
-    '</div>';
+  el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px">&#128190; Guardando cambios en la nube...</div>';
+
+  if(typeof window.saveMuchos === 'function'){
+    window.saveMuchos(DB.clientes, true).then(function(ok){
+      renderLista();
+      el.innerHTML=
+        '<div class="card" style="border-left:4px solid #27500A">'+
+          '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado y guardado</div>'+
+          '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados en la nube.</p>'+
+          '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
+        '</div>';
+    });
+  } else {
+    saveDB();
+    renderLista();
+    el.innerHTML=
+      '<div class="card" style="border-left:4px solid #27500A">'+
+        '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado</div>'+
+        '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados.</p>'+
+        '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
+      '</div>';
+  }
 }
 
 </script>
