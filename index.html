@@ -148,7 +148,7 @@ window.saveMuchos=async function(clientes, config){
   // clientes: array de clientes a guardar. config: true si también guardar config
   actualizarIndicador('guardando');
   window._fbSaving=true;
-  clearTimeout(_saveTimer);
+  // NO cancelar _saveTimer — es variable local del módulo
   try {
     const BSIZ=450;
     for(let i=0;i<clientes.length;i+=BSIZ){
@@ -2136,33 +2136,40 @@ function aplicarImportTelTramites(){
   const clientesModificados=data.map(function(r){return r.cliente;}).filter(Boolean);
   mostrarPreviewTel('<div style="color:#2557a7;font-size:12px">&#128190; Guardando '+clientesModificados.length+' clientes en la nube...</div>');
 
-  if(typeof window.saveMuchos === 'function'){
-    window.saveMuchos(clientesModificados, false).then(function(ok){
+  // Guardar con retry si saveMuchos aún no está disponible
+  function doSave(intentos){
+    if(typeof window.saveMuchos === 'function'){
+      window.saveMuchos(clientesModificados, false).then(function(ok){
+        renderLista();
+        if(clienteActivo){
+          const actualizado=DB.clientes.find(function(c){return c.id===clienteActivo.id;});
+          if(actualizado){ clienteActivo=actualizado; renderFicha(); }
+        }
+        mostrarPreviewTel(
+          '<div class="card" style="border-left:4px solid #27500A;margin-top:8px">'+
+            '<div class="card-title" style="color:#27500A;margin-bottom:6px">&#10003; Importación completada y guardada en la nube</div>'+
+            '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados con teléfonos y/o trámites.</p>'+
+            '<button class="btn btn-outline" style="margin-top:10px" onclick="renderImportarTelTramites()">Nueva importación</button>'+
+          '</div>'
+        );
+      });
+    } else if(intentos > 0){
+      mostrarPreviewTel('<div style="color:#2557a7;font-size:12px">&#9203; Esperando conexión con Firebase...</div>');
+      setTimeout(function(){ doSave(intentos-1); }, 1000);
+    } else {
+      // Último fallback — guardar con saveDB normal
+      saveDB();
       renderLista();
-      if(clienteActivo){
-        const actualizado=DB.clientes.find(function(c){return c.id===clienteActivo.id;});
-        if(actualizado){ clienteActivo=actualizado; renderFicha(); }
-      }
       mostrarPreviewTel(
-        '<div class="card" style="border-left:4px solid #27500A;margin-top:8px">'+
-          '<div class="card-title" style="color:#27500A;margin-bottom:6px">&#10003; Importación completada y guardada</div>'+
-          '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados con teléfonos y/o trámites.</p>'+
+        '<div class="card" style="border-left:4px solid #e09020;margin-top:8px">'+
+          '<div class="card-title" style="color:#e09020;margin-bottom:6px">&#9888; Importación aplicada (guardar manualmente)</div>'+
+          '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados. Firebase no disponible — recargá la página para sincronizar.</p>'+
           '<button class="btn btn-outline" style="margin-top:10px" onclick="renderImportarTelTramites()">Nueva importación</button>'+
         '</div>'
       );
-    });
-  } else {
-    // Fallback si Firebase aún no cargó
-    saveDB();
-    renderLista();
-    mostrarPreviewTel(
-      '<div class="card" style="border-left:4px solid #27500A;margin-top:8px">'+
-        '<div class="card-title" style="color:#27500A;margin-bottom:6px">&#10003; Importación completada</div>'+
-        '<p style="font-size:13px;color:#555"><strong>'+aplicados+'</strong> clientes actualizados.</p>'+
-        '<button class="btn btn-outline" style="margin-top:10px" onclick="renderImportarTelTramites()">Nueva importación</button>'+
-      '</div>'
-    );
+    }
   }
+  doSave(5);
 }
 
 function renderMantenimiento(){
@@ -2319,26 +2326,33 @@ function ejecutarRenombradoCarteras(){
   const el=document.getElementById('herrContent');
   el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px">&#128190; Guardando cambios en la nube...</div>';
 
-  if(typeof window.saveMuchos === 'function'){
-    window.saveMuchos(DB.clientes, true).then(function(ok){
+  const todosClientes=DB.clientes.slice(); // copia del array actual
+  function doSaveRename(intentos){
+    if(typeof window.saveMuchos === 'function'){
+      window.saveMuchos(todosClientes, true).then(function(ok){
+        renderLista();
+        el.innerHTML=
+          '<div class="card" style="border-left:4px solid #27500A">'+
+            '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado y guardado en la nube</div>'+
+            '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados.</p>'+
+            '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
+          '</div>';
+      });
+    } else if(intentos > 0){
+      el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px">&#9203; Esperando conexión Firebase... ('+intentos+' intentos restantes)</div>';
+      setTimeout(function(){ doSaveRename(intentos-1); }, 1000);
+    } else {
+      saveDB();
       renderLista();
       el.innerHTML=
-        '<div class="card" style="border-left:4px solid #27500A">'+
-          '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado y guardado</div>'+
-          '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados en la nube.</p>'+
+        '<div class="card" style="border-left:4px solid #e09020">'+
+          '<div class="card-title" style="color:#e09020;margin-bottom:8px">&#9888; Renombrado aplicado (guardar manualmente)</div>'+
+          '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados. Firebase no disponible.</p>'+
           '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
         '</div>';
-    });
-  } else {
-    saveDB();
-    renderLista();
-    el.innerHTML=
-      '<div class="card" style="border-left:4px solid #27500A">'+
-        '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Renombrado completado</div>'+
-        '<p style="font-size:13px;color:#555"><strong>'+cambiados+'</strong> registros actualizados.</p>'+
-        '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado actual</button>'+
-      '</div>';
+    }
   }
+  doSaveRename(5);
 }
 
 </script>
