@@ -926,7 +926,154 @@ function renderCuenta(){
       <div class="v" style="font-size:20px;color:#27500A">$${totalDeuda.toLocaleString('es-AR')}</div>
     </div>
   </div>
-  ${crList||'<div style="color:#aaa;font-size:13px;padding:10px">Sin créditos cargados</div>'}`;
+  ${crList||'<div style="color:#aaa;font-size:13px;padding:10px">Sin cr&eacute;ditos cargados</div>'}
+  ${generarSeccionDS(c)}`;
+}
+
+function generarSeccionDS(c){
+  const esDS=(c.creditos||[]).some(function(cr){return (cr.entidad||'').toUpperCase().indexOf('DEPORT')>=0;})
+    ||(c.entidad||'').toUpperCase().indexOf('DEPORT')>=0;
+  if(!esDS) return '';
+
+  var html='<div class="card" style="border-top:3px solid #2557a7;margin-top:4px">';
+  html+='<div class="card-hdr"><div class="card-title">Actualizaci\u00f3n de deuda — Deport Show</div></div>';
+  html+='<div class="g2" style="margin-bottom:12px">';
+  html+='<div class="fld"><label>Tasa punitoria mensual (%)</label><input type="number" id="ds-tasa" value="15" step="0.5" oninput="calcDS()" style="width:100%;padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none"></div>';
+  html+='</div>';
+
+  // Cargar creditos DS
+  var credsDS=(c.creditos||[]).filter(function(cr){return (cr.entidad||'').toUpperCase().indexOf('DEPORT')>=0;});
+  if(!credsDS.length) credsDS=c.creditos||[];
+
+  html+='<div id="ds-creditos">';
+  credsDS.forEach(function(cr,i){
+    html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px;margin-bottom:8px;font-size:12px">';
+    html+='<strong>'+( cr.num||'Cr\u00e9dito '+(i+1))+'</strong>';
+    html+=' &nbsp;·&nbsp; Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong>';
+    html+=' &nbsp;·&nbsp; Mora: <strong>'+(cr.fecha||'—')+'</strong>';
+    html+='</div>';
+  });
+  html+='</div>';
+
+  html+='<button class="btn btn-dark" onclick="calcDS()" style="margin-bottom:12px">Calcular deuda actualizada</button>';
+  html+='<div id="ds-resultado"></div>';
+  html+='</div>';
+  return html;
+}
+
+function calcDS(){
+  var c=clienteActivo;
+  var tasaMens=(parseFloat(document.getElementById('ds-tasa')&&document.getElementById('ds-tasa').value||15))/100;
+  var credsDS=(c.creditos||[]).filter(function(cr){return (cr.entidad||'').toUpperCase().indexOf('DEPORT')>=0;});
+  if(!credsDS.length) credsDS=c.creditos||[];
+
+  var rd=function(n){return Math.round(n/100)*100;};
+  var fmt=function(n){return '$'+Math.round(n).toLocaleString('es-AR');};
+  var fHoy=new Date();
+
+  var totalCapital=0,totalPunitorios=0,totalSubtotal=0,totalHon=0,totalTotal=0,totalTotal1pago=0;
+  var detalles='';
+
+  credsDS.forEach(function(cr){
+    var capital=parseFloat(cr.capital)||0;
+    if(!capital) return;
+    var fVto=cr.fecha?new Date(cr.fecha):fHoy;
+    var dias=Math.max(0,Math.round((fHoy-fVto)/(1000*60*60*24)));
+    var honPct=dias<=720?0.25:0.30;
+    var punitorios=rd(capital*tasaMens*(dias/30));
+    var subtotal=rd(capital+punitorios);
+    var honorarios=rd(subtotal*honPct);
+    var total=rd(subtotal+honorarios);
+    var punit1pago=rd(punitorios*0.50);
+    var sub1pago=rd(capital+punit1pago);
+    var hon1pago=rd(sub1pago*honPct);
+    var total1pago=rd(sub1pago+hon1pago);
+    totalCapital+=capital;
+    totalPunitorios+=punitorios;
+    totalSubtotal+=subtotal;
+    totalHon+=honorarios;
+    totalTotal+=total;
+    totalTotal1pago+=total1pago;
+  });
+
+  totalPunitorios=rd(totalPunitorios);
+  totalSubtotal=rd(totalSubtotal);
+  totalHon=rd(totalHon);
+  totalTotal=rd(totalTotal);
+  totalTotal1pago=rd(totalTotal1pago);
+
+  function cuota(t,r,n){return t*r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1);}
+
+  var html='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
+  html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">D\u00edas de atraso</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+Math.max(0,Math.round((new Date()-new Date(credsDS[0]&&credsDS[0].fecha||new Date()))/(1000*60*60*24)))+'</div></div>';
+  html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">Punitorios</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+fmt(totalPunitorios)+'</div></div>';
+  html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">Sub total</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+fmt(totalSubtotal)+'</div></div>';
+  html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">Honorarios</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+fmt(totalHon)+'</div></div>';
+  html+='<div style="background:#EAF3DE;border-radius:7px;padding:10px;grid-column:span 2"><div style="font-size:10px;color:#27500A">Total a cobrar</div><div style="font-size:20px;font-weight:600;color:#27500A">'+fmt(totalTotal)+'</div></div>';
+  html+='</div>';
+
+  html+='<div style="font-size:10px;font-weight:700;color:#2557a7;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Opciones de pago</div>';
+  html+='<div style="font-size:12px">';
+  var ops=[
+    {label:'1 pago',nota:'con descuento',monto:totalTotal1pago},
+    {label:'3 cuotas',nota:'sin inter\u00e9s',monto:rd(totalTotal/3)},
+    {label:'6 cuotas',nota:'sin inter\u00e9s',monto:rd(totalTotal/6)},
+    {label:'9 cuotas',nota:'',monto:rd(cuota(totalTotal,0.03,9))},
+    {label:'12 cuotas',nota:'',monto:rd(cuota(totalTotal,0.03,12))},
+  ];
+  ops.forEach(function(o){
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0ec">';
+    html+='<span style="color:#555">'+o.label+'</span>';
+    html+='<span>'+(o.nota?'<span style="font-size:10px;color:#aaa;margin-right:8px">'+o.nota+'</span>':'')+'<strong>'+fmt(o.monto)+'</strong></span>';
+    html+='</div>';
+  });
+  html+='</div>';
+
+  html+='<div style="font-size:10px;font-weight:700;color:#2557a7;text-transform:uppercase;letter-spacing:.08em;margin:10px 0 8px">Cancelaci\u00f3n 1 cuota ca\u00edda — 50% dto punitorios</div>';
+  var punitDto=rd(totalPunitorios*0.50);
+  var subDto=rd(totalCapital+punitDto);
+  var honDto=rd(subDto*(totalHon/totalSubtotal||0.30));
+  var totalDto=rd(subDto+honDto);
+  var dtoOps=[
+    {label:'Punitorios con 50% dto',nota:'',monto:punitDto},
+    {label:'Sub total',nota:'',monto:subDto},
+    {label:'Honorarios',nota:'',monto:honDto},
+    {label:'Total',nota:'',monto:totalDto},
+    {label:'3 cuotas',nota:'sin inter\u00e9s',monto:rd(totalDto/3)},
+    {label:'6 cuotas',nota:'sin inter\u00e9s',monto:rd(totalDto/6)},
+    {label:'9 cuotas',nota:'',monto:rd(cuota(totalDto,0.03,9))},
+    {label:'12 cuotas',nota:'',monto:rd(cuota(totalDto,0.03,12))},
+  ];
+  html+='<div style="font-size:12px">';
+  dtoOps.forEach(function(o){
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0ec">';
+    html+='<span style="color:#555">'+o.label+'</span>';
+    html+='<span>'+(o.nota?'<span style="font-size:10px;color:#aaa;margin-right:8px">'+o.nota+'</span>':'')+'<strong>'+fmt(o.monto)+'</strong></span>';
+    html+='</div>';
+  });
+  html+='</div>';
+
+  html+='<button class="btn btn-green" onclick="copiarResumenDS()" style="margin-top:10px;width:100%">&#128203; Copiar para WhatsApp</button>';
+  html+='<div id="ds-txt-oculto" style="display:none">'+
+    'DEUDA ACTUALIZADA: '+fmt(totalTotal)+'\n\n'+
+    '1 pago (con descuento): '+fmt(totalTotal1pago)+'\n\n'+
+    '3 cuotas sin inter\u00e9s: '+fmt(rd(totalTotal/3))+'\n\n'+
+    '6 cuotas sin inter\u00e9s: '+fmt(rd(totalTotal/6))+'\n\n'+
+    '9 cuotas: '+fmt(rd(cuota(totalTotal,0.03,9)))+'\n\n'+
+    '12 cuotas: '+fmt(rd(cuota(totalTotal,0.03,12)))+
+  '</div>';
+
+  document.getElementById('ds-resultado').innerHTML=html;
+}
+
+function copiarResumenDS(){
+  var el=document.getElementById('ds-txt-oculto');
+  if(!el) return;
+  var txt=el.textContent;
+  navigator.clipboard.writeText(txt).then(function(){
+    var btn=document.querySelector('#ds-resultado .btn-green');
+    if(btn){btn.textContent='&#10003; Copiado!';setTimeout(function(){btn.innerHTML='&#128203; Copiar para WhatsApp';},2000);}
+  }).catch(function(){});
 }
 
 // -- TAB TRAMITES --
