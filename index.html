@@ -965,7 +965,17 @@ function calcDS(){
   credsDS.forEach(function(cr){
     var capital=parseFloat(cr.capital)||0;
     if(!capital) return;
-    var fVto=cr.fecha?new Date(cr.fecha):fHoy;
+    var fVto=fHoy;
+if(cr.fecha){
+  var partes=cr.fecha.split('/');
+  if(partes.length===3){
+    var d=parseInt(partes[0]),m=parseInt(partes[1])-1,y=parseInt(partes[2]);
+    if(y<100) y+=2000;
+    fVto=new Date(y,m,d);
+  } else {
+    fVto=new Date(cr.fecha);
+  }
+}
     var dias=Math.max(0,Math.round((fHoy-fVto)/(1000*60*60*24)));
     diasAtraso=Math.max(diasAtraso,dias);
     totalCapital+=capital;
