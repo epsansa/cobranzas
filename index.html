@@ -967,13 +967,20 @@ function calcDS(){
     if(!capital) return;
     var fVto=fHoy;
 if(cr.fecha){
-  var partes=cr.fecha.split('/');
+  var f=cr.fecha.toString().trim();
+  // Intentar formato dd/mm/yy o dd/mm/yyyy
+  var partes=f.split(/[\/\-]/);
   if(partes.length===3){
     var d=parseInt(partes[0]),m=parseInt(partes[1])-1,y=parseInt(partes[2]);
     if(y<100) y+=2000;
+    // Si el primer numero es > 12, definitivamente es dia
+    // Si no, asumir dd/mm/yyyy (formato argentino)
     fVto=new Date(y,m,d);
+  } else if(f.length===10 && f.indexOf('-')>0){
+    // Formato ISO yyyy-mm-dd
+    fVto=new Date(f);
   } else {
-    fVto=new Date(cr.fecha);
+    fVto=new Date(f);
   }
 }
     var dias=Math.max(0,Math.round((fHoy-fVto)/(1000*60*60*24)));
