@@ -1588,23 +1588,22 @@ function elimCartera(i){ DB.carteras.splice(i,1); saveDBConfig();renderConfigLis
 function renderConsultas(){
   document.getElementById('mainArea').innerHTML=`
   <div class="tabbar" id="consultaTabbar">
-    <div class="tb active" onclick="setTabConsulta('promesas',this)">Promesas registradas</div>
-    <div class="tb" onclick="setTabConsulta('contacto',this)">Último contacto</div>
+    <div class="tb active" onclick="setTabConsulta('contacto',this)">&#128222; Último contacto</div>
     <div class="tb" onclick="setTabConsulta('cobrables',this)">&#11088; Cuentas cobrables</div>
+    <div class="tb" onclick="setTabConsulta('comercios',this)">&#127981; Comercios</div>
   </div>
   <div class="tabcontent" id="consultaContent"></div>`;
-  renderConsultaPromesas();
+  renderConsultaContacto();
 }
 
 function setTabConsulta(tab, el){
   var bar=document.getElementById('consultaTabbar');
-  if(bar) bar.querySelectorAll('.tb').forEach(t=>t.classList.remove('active'));
+  if(bar) bar.querySelectorAll('.tb').forEach(function(t){t.classList.remove('active');});
   if(el) el.classList.add('active');
-  if(tab==='promesas') renderConsultaPromesas();
-  else if(tab==='contacto') renderConsultaContacto();
-  else renderConsultaCobrables();
+  if(tab==='contacto') renderConsultaContacto();
+  else if(tab==='cobrables') renderConsultaCobrables();
+  else renderComerciosConsulta();
 }
-
 function renderConsultaPromesas(){
   const el=document.getElementById('consultaContent');
   el.innerHTML=`
@@ -1834,6 +1833,51 @@ function exportarCobrables(){
   a.href=url;a.download='cuentas_cobrables.xlsx';
   document.body.appendChild(a);a.click();
   setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);
+}
+function renderComerciosConsulta(){
+  var el=document.getElementById('consultaContent');
+  var comercios=DB.comercios||[];
+  el.innerHTML='<div class="card">'+
+    '<div class="card-hdr">'+
+    '<div class="card-title">&#127981; Comercios</div>'+
+    '<button class="btn btn-dark btn-sm" onclick="abrirNuevoComercio()">+ Nuevo</button>'+
+    '</div>'+
+    (comercios.length?
+      '<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel\u00e9fono</th><th>Mail</th><th></th></tr></thead><tbody>'+
+      comercios.map(function(c,i){
+        return '<tr>'+
+          '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
+          '<td>'+(c.producto||'&mdash;')+'</td>'+
+          '<td>'+(c.localidad||'&mdash;')+'</td>'+
+          '<td>'+(c.telefono||'&mdash;')+'</td>'+
+          '<td>'+(c.mail||'&mdash;')+'</td>'+
+          '<td><button class="btn btn-outline btn-sm" onclick="editarComercio('+i+')">&#9998;</button></td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table>'
+    :'<div style="color:#aaa;font-size:13px;padding:10px">Sin comercios cargados</div>')+
+  '</div>';
+}
+function abrirNuevoComercio(){
+  var nombre=prompt('Nombre del comercio:');
+  if(!nombre) return;
+  if(!DB.comercios) DB.comercios=[];
+  DB.comercios.push({nombre:nombre,producto:'',direccion:'',localidad:'',telefono:'',mail:'',datos:''});
+  saveDBConfig();
+  renderComerciosConsulta();
+}
+function editarComercio(i){
+  var c=DB.comercios[i];
+  var nombre=prompt('Nombre:',c.nombre||'');
+  if(nombre===null) return;
+  c.nombre=nombre;
+  c.producto=prompt('Producto:',c.producto||'')||'';
+  c.localidad=prompt('Localidad:',c.localidad||'')||'';
+  c.telefono=prompt('Tel\u00e9fono:',c.telefono||'')||'';
+  c.mail=prompt('Mail:',c.mail||'')||'';
+  DB.comercios[i]=c;
+  saveDBConfig();
+  renderComerciosConsulta();
 }
 function filtrarContacto(){
   const ent=document.getElementById('cc-ent').value;
