@@ -1878,25 +1878,58 @@ function renderComerciosConsulta(){
   '</div>';
 }
 function abrirNuevoComercio(){
-  var nombre=prompt('Nombre del comercio:');
-  if(!nombre) return;
-  if(!DB.comercios) DB.comercios=[];
-  DB.comercios.push({nombre:nombre,producto:'',direccion:'',localidad:'',telefono:'',mail:'',datos:''});
-  saveDBConfig();
-  renderComerciosConsulta();
+  var _editComercioIdx=null;
+function abrirNuevoComercio(){
+  _editComercioIdx=null;
+  ['nombre','producto','direccion','localidad','telefono','mail','datos'].forEach(function(f){
+    var el=document.getElementById('com-'+f);
+    if(el) el.value='';
+  });
+  document.getElementById('mComTit').textContent='Nuevo Comercio';
+  document.getElementById('btnElimComercio').style.display='none';
+  document.getElementById('modalComercio').classList.add('open');
 }
 function editarComercio(i){
+  _editComercioIdx=i;
   var c=DB.comercios[i];
-  var nombre=prompt('Nombre:',c.nombre||'');
-  if(nombre===null) return;
-  c.nombre=nombre;
-  c.producto=prompt('Producto:',c.producto||'')||'';
-  c.localidad=prompt('Localidad:',c.localidad||'')||'';
-  c.telefono=prompt('Tel\u00e9fono:',c.telefono||'')||'';
-  c.mail=prompt('Mail:',c.mail||'')||'';
-  c.datos=prompt('Observaciones:',c.datos||'')||'';
-  DB.comercios[i]=c;
+  document.getElementById('com-nombre').value=c.nombre||'';
+  document.getElementById('com-producto').value=c.producto||'';
+  document.getElementById('com-direccion').value=c.direccion||'';
+  document.getElementById('com-localidad').value=c.localidad||'';
+  document.getElementById('com-telefono').value=c.telefono||'';
+  document.getElementById('com-mail').value=c.mail||'';
+  document.getElementById('com-datos').value=c.datos||'';
+  document.getElementById('mComTit').textContent='Editar Comercio';
+  document.getElementById('btnElimComercio').style.display='block';
+  document.getElementById('modalComercio').classList.add('open');
+}
+function guardarComercio(){
+  var datos={
+    nombre:document.getElementById('com-nombre').value.trim(),
+    producto:document.getElementById('com-producto').value.trim(),
+    direccion:document.getElementById('com-direccion').value.trim(),
+    localidad:document.getElementById('com-localidad').value.trim(),
+    telefono:document.getElementById('com-telefono').value.trim(),
+    mail:document.getElementById('com-mail').value.trim(),
+    datos:document.getElementById('com-datos').value.trim()
+  };
+  if(!datos.nombre){alert('El nombre es obligatorio');return;}
+  if(!DB.comercios) DB.comercios=[];
+  if(_editComercioIdx!==null){
+    DB.comercios[_editComercioIdx]=datos;
+  } else {
+    DB.comercios.push(datos);
+  }
   saveDBConfig();
+  cerrarModal('modalComercio');
+  renderComerciosConsulta();
+}
+function eliminarComercio(){
+  if(_editComercioIdx===null) return;
+  if(!confirm('¿Eliminar este comercio?')) return;
+  DB.comercios.splice(_editComercioIdx,1);
+  saveDBConfig();
+  cerrarModal('modalComercio');
   renderComerciosConsulta();
 }
 function filtrarContacto(){
