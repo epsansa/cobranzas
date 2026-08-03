@@ -533,7 +533,25 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-outline" onclick="cerrarModal('modalTr')">Cancelar</button>
   </div>
 </div></div>
-
+<div class="modal-overlay" id="modalComercio">
+<div class="modal">
+  <h3 id="mComTit">Editar Comercio</h3>
+  <div style="display:grid;gap:10px;margin-bottom:14px">
+    <div class="fld"><label>Nombre</label><input id="com-nombre" placeholder="Nombre del comercio"></div>
+    <div class="fld"><label>Producto</label><input id="com-producto" placeholder="Producto"></div>
+    <div class="fld"><label>Direcci\u00f3n</label><input id="com-direccion" placeholder="Direcci\u00f3n"></div>
+    <div class="fld"><label>Localidad</label><input id="com-localidad" placeholder="Localidad"></div>
+    <div class="fld"><label>Tel\u00e9fono</label><input id="com-telefono" placeholder="Tel\u00e9fono"></div>
+    <div class="fld"><label>Mail</label><input id="com-mail" placeholder="Mail"></div>
+    <div class="fld"><label>Observaciones</label><textarea id="com-datos" style="width:100%;padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;resize:vertical;min-height:60px;font-family:Arial" placeholder="Observaciones..."></textarea></div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-dark" onclick="guardarComercio()">Guardar</button>
+    <button class="btn btn-outline" onclick="cerrarModal('modalComercio')">Cancelar</button>
+    <button class="btn btn-red" id="btnElimComercio" onclick="eliminarComercio()" style="margin-left:auto">Eliminar</button>
+  </div>
+</div>
+</div>
 <div class="modal-overlay" id="modalConfig"><div class="modal">
   <h3>Configurar Entidades, Carteras y Estados</h3>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
