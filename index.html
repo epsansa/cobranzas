@@ -2739,10 +2739,8 @@ function ejecutarRenombradoCarteras(){
     }
   }
   doSaveRename(5);
+
 }
-
-
-function saveMuchos(clientes,callback){ if(callback) callback(); }
 
 // Cerrar modales con click afuera
 document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
