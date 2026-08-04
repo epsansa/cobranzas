@@ -2,19 +2,22 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgNjgwIj48Y2lyY2xlIGN4PSIzNDAiIGN5PSIzNDAiIHI9IjMxMCIgZmlsbD0iIzFhM2E2YiIvPjx0ZXh0IHg9IjM0MCIgeT0iNDIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjMyMCIgZm9udC1mYW1pbHk9IkFwcGxlIENvbG9yIEVtb2ppLFNlZ29lIFVJIEVtb2ppLE5vdG8gQ29sb3IgRW1vamksc2Fucy1zZXJpZiI+JiM5ODc4OyYjNjUwMzk7PC90ZXh0Pjwvc3ZnPg==">
+<link rel="icon" type="image/svg+xml" href="<a class="html-attribute-value html-resource-link" target="_blank" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgNjgwIj48Y2lyY2xlIGN4PSIzNDAiIGN5PSIzNDAiIHI9IjMxMCIgZmlsbD0iIzFhM2E2YiIvPjx0ZXh0IHg9IjM0MCIgeT0iNDIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjMyMCIgZm9udC1mYW1pbHk9IkFwcGxlIENvbG9yIEVtb2ppLFNlZ29lIFVJIEVtb2ppLE5vdG8gQ29sb3IgRW1vamksc2Fucy1zZXJpZiI+JiM5ODc4OyYjNjUwMzk7PC90ZXh0Pjwvc3ZnPg==" rel="noreferrer noopener">data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgNjgwIj48Y2lyY2xlIGN4PSIzNDAiIGN5PSIzNDAiIHI9IjMxMCIgZmlsbD0iIzFhM2E2YiIvPjx0ZXh0IHg9IjM0MCIgeT0iNDIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjMyMCIgZm9udC1mYW1pbHk9IkFwcGxlIENvbG9yIEVtb2ppLFNlZ29lIFVJIEVtb2ppLE5vdG8gQ29sb3IgRW1vamksc2Fucy1zZXJpZiI+JiM5ODc4OyYjNjUwMzk7PC90ZXh0Pjwvc3ZnPg==</a>">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Sistema de Cobranzas">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="expires" content="0">
 <title>Sistema Collector — EPSAN</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="<a class="html-attribute-value html-resource-link" target="_blank" href="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" rel="noreferrer noopener">https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js</a>"></script>
 <script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-
+<br>
 const firebaseConfig = {
   apiKey: "AIzaSyBcOR-D4SKD7kA-VNcnXTvzw4ajpukXPFU",
   authDomain: "epsan-cobranzas.firebaseapp.com",
@@ -23,17 +26,17 @@ const firebaseConfig = {
   messagingSenderId: "550697642367",
   appId: "1:550697642367:web:fde2fbab046f7d7f0e924a"
 };
-
+<br>
 const fbApp = initializeApp(firebaseConfig);
 const db_fs = getFirestore(fbApp);
 const auth = getAuth(fbApp);
 const CONFIG_REF = doc(db_fs, "sistema", "config");
 const CLIENTES_COL = collection(db_fs, "clientes");
-
+<br>
 window._fbConnected = false;
 window._fbSaving = false;
 window._fbLastSave = null;
-
+<br>
 // -- AUTH --
 window.loginEpsan = async function(){
   const mail = document.getElementById('login-mail').value.trim();
@@ -51,15 +54,15 @@ window.loginEpsan = async function(){
     btn.textContent='Ingresar'; btn.disabled=false;
   }
 };
-
+<br>
 window.logoutEpsan = async function(){
   if(!confirm('¿Cerrar sesión?')) return;
   await signOut(auth);
 };
-
+<br>
 // Enter en login
 window.loginKeydown = function(e){ if(e.key==='Enter') window.loginEpsan(); };
-
+<br>
 function mostrarLogin(){
   document.getElementById('app').style.display='none';
   document.getElementById('login-screen').style.display='flex';
@@ -69,12 +72,12 @@ function mostrarLogin(){
   document.getElementById('login-btn').textContent='Ingresar';
   document.getElementById('login-btn').disabled=false;
 }
-
+<br>
 function mostrarApp(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='flex';
 }
-
+<br>
 // -- INDICADOR --
 function actualizarIndicador(estado, extra){
   const el=document.getElementById('fb-status'); if(!el) return;
@@ -85,7 +88,7 @@ function actualizarIndicador(estado, extra){
   window._fbActualizarIndicador=actualizarIndicador;
 }
 function mostrarError(msg){ const el=document.getElementById('fb-status'); if(el) el.innerHTML='<span style="color:#ff8888" title="'+msg+'">&#9888; Error</span>'; }
-
+<br>
 // -- SAVE --
 let _saveTimer=null;
 window.saveDB=function(clienteModificado){
@@ -110,13 +113,13 @@ window.saveDB=function(clienteModificado){
 };
 window.saveDBCliente=function(c){ window.saveDB(c); };
 window.saveDBConfig=function(){ window.saveDB(null); };
-
+<br>
 window.deleteClienteDB=async function(id){
   window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
   try{ await deleteDoc(doc(db_fs,'clientes',id)); }catch(e){}
   try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
 };
-
+<br>
 window.importarMasivo=async function(clientes,reemplazar){
   actualizarIndicador('guardando');
   window._fbSaving=true;
@@ -142,11 +145,11 @@ window.importarMasivo=async function(clientes,reemplazar){
     return true;
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
 };
-
+<br>
 // -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
-
+<br>
   // 1. Intentar cargar desde localStorage primero (carga instantánea)
   const local=localStorage.getItem('epsan_v3');
   if(local){
@@ -158,7 +161,7 @@ async function cargarDatos(){
       if(window.clienteActivo) renderFicha(); else renderWelcome();
     }catch(e){}
   }
-
+<br>
   // 2. Luego sincronizar con Firebase en segundo plano
   try {
     // Cargar config (entidades, carteras, comercios) — documento pequeño
@@ -170,7 +173,7 @@ async function cargarDatos(){
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
       window.DB.estados=cfg.estados||window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
     }
-
+<br>
     // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
     const cliSnap=await getDocs(CLIENTES_COL);
     window.DB.clientes=[];
@@ -178,16 +181,16 @@ async function cargarDatos(){
       try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
     });
     if(!window.DB.comercios) window.DB.comercios=[];
-
+<br>
     window._fbConnected=true;
     actualizarIndicador('ok');
-
+<br>
     // Guardar en localStorage para próxima carga rápida
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
-
+<br>
     renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
-
+<br>
     // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
     // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
     onSnapshot(CONFIG_REF,function(snap){
@@ -197,7 +200,7 @@ async function cargarDatos(){
       window.DB.carteras=cfg.carteras||window.DB.carteras;
       window.DB.comercios=cfg.comercios||window.DB.comercios;
     });
-
+<br>
     // 4. Botón para refrescar clientes manualmente si lo necesitan
     window.refrescarClientes = async function(){
       actualizarIndicador('conectando');
@@ -209,7 +212,7 @@ async function cargarDatos(){
       renderLista();
       if(window.clienteActivo) renderFicha(); else renderWelcome();
     };
-
+<br>
   } catch(e){
     console.error('Error Firebase:',e);
     window._fbConnected=false;
@@ -220,7 +223,7 @@ async function cargarDatos(){
     if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
 }
-
+<br>
 // -- AUTH STATE --
 onAuthStateChanged(auth, function(user){
   if(user){
@@ -234,8 +237,8 @@ onAuthStateChanged(auth, function(user){
     mostrarLogin();
   }
 });
-
-
+<br>
+<br>
 // -- saveMuchos: guardar multiples clientes en paralelo (4 batches a la vez) --
 window.saveMuchos = async function(clientes, config){
   window._fbSaving = true;
@@ -278,14 +281,14 @@ window.saveMuchos = async function(clientes, config){
     return false;
   }
 };
-
+<br>
 window._fbActualizarIndicador=actualizarIndicador;
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#edf2f9;color:#1a1a1a;font-size:13px;height:100vh;display:flex;flex-direction:column}
 a{color:inherit;text-decoration:none}
-
+<br>
 /* LOGIN */
 #login-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(135deg,#1a3a6b 0%,#2557a7 100%)}
 .login-box{background:#fff;border-radius:16px;padding:36px 32px;width:340px;box-shadow:0 8px 32px rgba(0,0,0,.18)}
@@ -299,7 +302,7 @@ a{color:inherit;text-decoration:none}
 .login-btn{width:100%;padding:10px;background:linear-gradient(135deg,#1e4a96,#2d63b8);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
 .login-btn:hover{background:linear-gradient(135deg,#2557a7,#3a78d0)}
 .login-btn:disabled{opacity:.6;cursor:not-allowed}
-
+<br>
 /* APP */
 #app{display:none;flex-direction:column;height:100vh}
 .topnav{background:linear-gradient(135deg,#1a3a6b 0%,#2557a7 100%);color:#fff;display:flex;align-items:center;height:44px;padding:0 16px;gap:4px;flex-shrink:0;border-bottom:2px solid #4a80d4}
@@ -312,7 +315,7 @@ a{color:inherit;text-decoration:none}
 #user-email{font-size:11px;color:#a8c4e8}
 .btn-logout{padding:3px 10px;border-radius:6px;border:1px solid #a8c4e8;background:transparent;color:#a8c4e8;font-size:11px;cursor:pointer}
 .btn-logout:hover{background:rgba(255,255,255,.15);color:#fff}
-
+<br>
 .body{display:flex;flex:1;overflow:hidden}
 .leftpanel{width:260px;background:#fff;border-right:1px solid #c8d8ec;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
 .leftpanel .lp-header{padding:10px;border-bottom:2px solid #dce8f5;background:linear-gradient(180deg,#e8f2fc 0%,#f4f8fd 100%);flex-shrink:0}
@@ -391,7 +394,7 @@ a{color:inherit;text-decoration:none}
 </style>
 </head>
 <body>
-
+<br>
 <!-- PANTALLA LOGIN -->
 <div id="login-screen">
   <div class="login-box">
@@ -409,7 +412,7 @@ a{color:inherit;text-decoration:none}
     <button class="login-btn" id="login-btn" onclick="loginEpsan()">Ingresar</button>
   </div>
 </div>
-
+<br>
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
@@ -426,7 +429,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn-logout" onclick="logoutEpsan()">Salir</button>
   </div>
 </div>
-
+<br>
 <div class="body">
 <div class="leftpanel" id="leftPanel">
   <div class="lp-header">
@@ -448,7 +451,7 @@ a{color:inherit;text-decoration:none}
 </div>
 </div>
 </div>
-
+<br>
 <!-- MODALES -->
 <div class="modal-overlay" id="modalCli"><div class="modal">
   <h3 id="mCliTit">Nuevo Cliente</h3>
@@ -468,7 +471,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-red" id="btnElimCli" onclick="eliminarCliente()" style="margin-left:auto;display:none">Eliminar cliente</button>
   </div>
 </div></div>
-
+<br>
 <div class="modal-overlay" id="modalCred"><div class="modal">
   <h3 id="mCredTit">Nuevo Cr&#233;dito</h3>
   <div class="g2" style="gap:10px;margin-bottom:10px">
@@ -486,7 +489,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-red" id="btnElimCred" onclick="eliminarCredito()" style="margin-left:auto;display:none">Eliminar</button>
   </div>
 </div></div>
-
+<br>
 <div class="modal-overlay" id="modalPlan"><div class="modal">
   <h3>Generar Plan de Pagos</h3>
   <div style="background:#f8f4e8;border:1px solid #e8d89a;border-radius:8px;padding:12px;margin-bottom:12px">
@@ -509,7 +512,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-outline" onclick="cerrarModal('modalPlan')">Cancelar</button>
   </div>
 </div></div>
-
+<br>
 <div class="modal-overlay" id="modalTr"><div class="modal">
   <h3>Nuevo Tr&#225;mite</h3>
   <div style="display:grid;gap:9px;margin-bottom:10px">
@@ -584,7 +587,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-dark" onclick="cerrarModal('modalConfig');renderLista()">Listo</button>
   </div>
 </div></div>
-
+<br>
 <script>
 // ===================================================
 // BASE DE DATOS LOCAL
@@ -962,7 +965,7 @@ function generarSeccionDS(c){
   if(!credsDS.length) credsDS=c.creditos||[];
   credsDS.forEach(function(cr){
     html+='<div style="background:#f4f8fd;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:12px">';
-    html+='<strong>'+(cr.num||'Sin n\u00famero')+'</strong> &nbsp;&middot;&nbsp; Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong> &nbsp;&middot;&nbsp; Mora: <strong>'+(cr.fecha||'—')+'</strong>';
+    html+='<strong>'+(cr.num||'Sin n\u00famero')+'</strong>  &middot;  Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong>  &middot;  Mora: <strong>'+(cr.fecha||'—')+'</strong>';
     html+='</div>';
   });
   html+='<div id="ds-resultado"></div></div>';
@@ -1803,7 +1806,7 @@ function calcularCobrables(){
   var el=document.getElementById('cob-resultado');
   if(!lista.length){el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px">Sin resultados</div>';return;}
 
-  el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">'+lista.length+' cuenta/s &nbsp;·&nbsp; <em>Ordenadas por probabilidad de cobro</em></div>'+
+  el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">'+lista.length+' cuenta/s  ·  <em>Ordenadas por probabilidad de cobro</em></div>'+
     '<div style="overflow-x:auto">'+
     '<table class="tbl"><thead><tr>'+
     '<th>#</th><th>Puntaje</th><th>Nombre</th><th>DNI</th><th>Capital</th><th>D\u00edas mora</th><th>Tr\u00e1mites</th><th>Tels</th><th>Estado</th>'+
@@ -1877,8 +1880,6 @@ function renderComerciosConsulta(){
     :'<div style="color:#aaa;font-size:13px;padding:10px">Sin comercios cargados</div>')+
   '</div>';
 }
-function abrirNuevoComercio(){
-  var _editComercioIdx=null;
 function abrirNuevoComercio(){
   _editComercioIdx=null;
   ['nombre','producto','direccion','localidad','telefono','mail','datos'].forEach(function(f){
@@ -2511,7 +2512,7 @@ function renderImportarTelTramites(){
     '<div class="card">'+
     '<div class="card-hdr"><div class="card-title">&#128222; Importar teléfonos y trámites</div></div>'+
     '<p style="font-size:12px;color:#666;margin-bottom:12px">'+
-      'El archivo Excel debe contener las columnas: <strong>dni</strong>, <strong>nombre</strong>, <strong>telefono</strong>, <strong>tramite</strong>.<br>'+
+      'El archivo Excel debe contener las columnas: <strong>dni</strong>, <strong>nombre</strong>, <strong>telefono</strong>, <strong>tramite</strong>.'+
       'Solo se actualizan clientes que ya existen en la base.'+
     '</p>'+
     '<label style="display:inline-block;padding:14px 22px;border:2px dashed #ccc;border-radius:8px;cursor:pointer;font-size:13px;color:#888;text-align:center;width:100%">'+
@@ -2725,7 +2726,7 @@ function ejecutarRenombradoCarteras(){
         el.innerHTML=
           '<div class="card" style="border-left:4px solid #27500A">'+
             '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Completado y guardado en la nube</div>'+
-            '<p style="font-size:13px;color:#555"><strong>'+clientesModificados.length+'</strong> clientes &nbsp;&middot;&nbsp; <strong>'+cambiados+'</strong> créditos renombrados.</p>'+
+            '<p style="font-size:13px;color:#555"><strong>'+clientesModificados.length+'</strong> clientes  &middot;  <strong>'+cambiados+'</strong> créditos renombrados.</p>'+
             '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado</button>'+
           '</div>';
       });
