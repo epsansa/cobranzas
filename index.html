@@ -550,7 +550,7 @@ a{color:inherit;text-decoration:none}
     <div class="fld"><label>Observaciones</label><textarea id="com-datos" style="width:100%;padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;resize:vertical;min-height:60px;font-family:Arial" placeholder="Observaciones..."></textarea></div>
   </div>
   <div class="btn-row">
-    <button class="btn btn-dark" onclick="guardarComercio()">Guardar</button>
+    <button class="btn btn-dark" onclick="guardarComercioConsulta()">Guardar</button>
     <button class="btn btn-outline" onclick="cerrarModal('modalComercio')">Cancelar</button>
     <button class="btn btn-red" id="btnElimComercio" onclick="eliminarComercio()" style="margin-left:auto">Eliminar</button>
   </div>
@@ -1640,7 +1640,70 @@ function renderConsultaPromesas(){
     <div id="res-promesas"></div>
   </div>`;
 }
+function renderComerciosConsulta(){
+  var el=document.getElementById('consultaContent');
+  var comercios=DB.comercios||[];
+  el.innerHTML='<div class="card">'+
+    '<div class="card-hdr"><div class="card-title">Comercios</div>'+
+    '<button class="btn btn-dark btn-sm" onclick="abrirModalComercioConsulta(-1)">+ Nuevo</button></div>'+
+    (comercios.length?
+      '<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel&eacute;fono</th><th>Mail</th><th>Observaciones</th><th></th></tr></thead><tbody>'+
+      comercios.map(function(c,i){
+        return '<tr>'+
+          '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
+          '<td>'+(c.producto||'&mdash;')+'</td>'+
+          '<td>'+(c.localidad||'&mdash;')+'</td>'+
+          '<td>'+(c.telefono||'&mdash;')+'</td>'+
+          '<td>'+(c.mail||'&mdash;')+'</td>'+
+          '<td style="max-width:200px;font-size:11px">'+(c.datos||'&mdash;')+'</td>'+
+          '<td><button class="btn btn-outline btn-sm" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
+        '</tr>';
+      }).join('')+'</tbody></table>'
+    :'<div style="color:#aaa;font-size:13px;padding:10px">Sin comercios cargados</div>')+
+  '</div>';
+}
 
+var _idxComercio=null;
+function abrirModalComercioConsulta(i){
+  _idxComercio=i;
+  var c=i>=0?(DB.comercios||[])[i]:{};
+  document.getElementById('com-nombre').value=c.nombre||'';
+  document.getElementById('com-producto').value=c.producto||'';
+  document.getElementById('com-direccion').value=c.direccion||'';
+  document.getElementById('com-localidad').value=c.localidad||'';
+  document.getElementById('com-telefono').value=c.telefono||'';
+  document.getElementById('com-mail').value=c.mail||'';
+  document.getElementById('com-datos').value=c.datos||'';
+  document.getElementById('mComTit').textContent=i>=0?'Editar Comercio':'Nuevo Comercio';
+  document.getElementById('btnElimComercio').style.display=i>=0?'block':'none';
+  document.getElementById('modalComercio').classList.add('open');
+}
+function guardarComercioConsulta(){
+  var datos={
+    nombre:document.getElementById('com-nombre').value.trim(),
+    producto:document.getElementById('com-producto').value.trim(),
+    direccion:document.getElementById('com-direccion').value.trim(),
+    localidad:document.getElementById('com-localidad').value.trim(),
+    telefono:document.getElementById('com-telefono').value.trim(),
+    mail:document.getElementById('com-mail').value.trim(),
+    datos:document.getElementById('com-datos').value.trim()
+  };
+  if(!datos.nombre){alert('El nombre es obligatorio');return;}
+  if(!DB.comercios) DB.comercios=[];
+  if(_idxComercio>=0) DB.comercios[_idxComercio]=datos;
+  else DB.comercios.push(datos);
+  saveDBConfig();
+  cerrarModal('modalComercio');
+  renderComerciosConsulta();
+}
+function eliminarComercioConsulta(){
+  if(_idxComercio<0) return;
+  if(!confirm('Eliminar este comercio?')) return;
+  DB.comercios.splice(_idxComercio,1);
+  saveDBConfig();
+  cerrarModal('modalComercio');
+  renderComerciosConsulta();
+}
 function filtrarPromesas(){
   const ent=document.getElementById('cp-ent').value;
   const car=document.getElementById('cp-car').value;
