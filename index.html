@@ -648,10 +648,11 @@ function renderLista(){
 
 // Busqueda con debounce
 var _buscarTimer=null;
+var _buscarTimer=null;
 function buscarLista(){
   clearTimeout(_buscarTimer);
   _buscarTimer=setTimeout(function(){
-    const q=(document.getElementById('srchInput').value||'').trim();
+    var q=(document.getElementById('srchInput').value||'').trim();
     if(q.length>=3){
       buscarEnFirebase(q);
     } else if(q.length===0){
@@ -660,19 +661,17 @@ function buscarLista(){
     }
   },500);
 }
-
 async function buscarEnFirebase(q){
-  if(!window._fbConnected) return;
   actualizarIndicador('guardando');
   try {
-    const snap=await getDocs(CLIENTES_COL);
-    const qNorm=q.toLowerCase().replace(/\./, '');
+    var snap=await getDocs(CLIENTES_COL);
+    var qNorm=q.toLowerCase().replace(/\./g,'');
     window.DB.clientes=[];
     snap.forEach(function(d){
       try{
-        const c=JSON.parse(d.data().data);
-        const dniNorm=(c.dni||'').replace(/\./g,'');
-        const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+        var c=JSON.parse(d.data().data);
+        var dniNorm=(c.dni||'').replace(/\./g,'');
+        var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
         if(txt.includes(qNorm)) window.DB.clientes.push(c);
       }catch(e){}
     });
@@ -683,14 +682,13 @@ async function buscarEnFirebase(q){
     actualizarIndicador('error');
   }
 }
-
 function irPrimerResultado(){
-  const q=(document.getElementById('srchInput').value||'').toLowerCase();
+  var q=(document.getElementById('srchInput').value||'').toLowerCase();
   if(!q) return;
-  const encontrado=DB.clientes.find(function(c){
-    const qNorm=q.replace(/\./g,'');
-    const dniNorm=(c.dni||'').replace(/\./g,'');
-    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+  var encontrado=DB.clientes.find(function(c){
+    var qNorm=q.replace(/\./g,'');
+    var dniNorm=(c.dni||'').replace(/\./g,'');
+    var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
     return txt.includes(qNorm);
   });
   if(encontrado){ selCliente(encontrado.id); setTabAdmin('datos'); }
