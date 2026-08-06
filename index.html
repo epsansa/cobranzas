@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="icon" type="image/svg+xml" href="<a class="html-attribute-value html-resource-link" target="_blank" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgNjgwIj48Y2lyY2xlIGN4PSIzNDAiIGN5PSIzNDAiIHI9IjMxMCIgZmlsbD0iIzFhM2E2YiIvPjx0ZXh0IHg9IjM0MCIgeT0iNDIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjMyMCIgZm9udC1mYW1pbHk9IkFwcGxlIENvbG9yIEVtb2ppLFNlZ29lIFVJIEVtb2ppLE5vdG8gQ29sb3IgRW1vamksc2Fucy1zZXJpZiI+JiM5ODc4OyYjNjUwMzk7PC90ZXh0Pjwvc3ZnPg==" rel="noreferrer noopener">data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2ODAgNjgwIj48Y2lyY2xlIGN4PSIzNDAiIGN5PSIzNDAiIHI9IjMxMCIgZmlsbD0iIzFhM2E2YiIvPjx0ZXh0IHg9IjM0MCIgeT0iNDIwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjMyMCIgZm9udC1mYW1pbHk9IkFwcGxlIENvbG9yIEVtb2ppLFNlZ29lIFVJIEVtb2ppLE5vdG8gQ29sb3IgRW1vamksc2Fucy1zZXJpZiI+JiM5ODc4OyYjNjUwMzk7PC90ZXh0Pjwvc3ZnPg==</a>">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Sistema de Cobranzas">
@@ -11,13 +11,13 @@
 <meta http-equiv="pragma" content="no-cache">
 <meta http-equiv="expires" content="0">
 <title>Sistema Collector — EPSAN</title>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-
+<br>
 const firebaseConfig = {
   apiKey: "AIzaSyBcOR-D4SKD7kA-VNcnXTvzw4ajpukXPFU",
   authDomain: "epsan-cobranzas.firebaseapp.com",
@@ -26,17 +26,17 @@ const firebaseConfig = {
   messagingSenderId: "550697642367",
   appId: "1:550697642367:web:fde2fbab046f7d7f0e924a"
 };
-
+<br>
 const fbApp = initializeApp(firebaseConfig);
 const db_fs = getFirestore(fbApp);
 const auth = getAuth(fbApp);
 const CONFIG_REF = doc(db_fs, "sistema", "config");
 const CLIENTES_COL = collection(db_fs, "clientes");
-
+<br>
 window._fbConnected = false;
 window._fbSaving = false;
 window._fbLastSave = null;
-
+<br>
 // -- AUTH --
 window.loginEpsan = async function(){
   const mail = document.getElementById('login-mail').value.trim();
@@ -54,16 +54,15 @@ window.loginEpsan = async function(){
     btn.textContent='Ingresar'; btn.disabled=false;
   }
 };
-
+<br>
 window.logoutEpsan = async function(){
   if(!confirm('¿Cerrar sesión?')) return;
   await signOut(auth);
 };
-
-  
+<br>
 // Enter en login
 window.loginKeydown = function(e){ if(e.key==='Enter') window.loginEpsan(); };
-
+<br>
 function mostrarLogin(){
   document.getElementById('app').style.display='none';
   document.getElementById('login-screen').style.display='flex';
@@ -73,12 +72,12 @@ function mostrarLogin(){
   document.getElementById('login-btn').textContent='Ingresar';
   document.getElementById('login-btn').disabled=false;
 }
-
+<br>
 function mostrarApp(){
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='flex';
 }
-
+<br>
 // -- INDICADOR --
 function actualizarIndicador(estado, extra){
   const el=document.getElementById('fb-status'); if(!el) return;
@@ -89,7 +88,7 @@ function actualizarIndicador(estado, extra){
   window._fbActualizarIndicador=actualizarIndicador;
 }
 function mostrarError(msg){ const el=document.getElementById('fb-status'); if(el) el.innerHTML='<span style="color:#ff8888" title="'+msg+'">&#9888; Error</span>'; }
-
+<br>
 // -- SAVE --
 let _saveTimer=null;
 window.saveDB=function(clienteModificado){
@@ -114,13 +113,13 @@ window.saveDB=function(clienteModificado){
 };
 window.saveDBCliente=function(c){ window.saveDB(c); };
 window.saveDBConfig=function(){ window.saveDB(null); };
-
+<br>
 window.deleteClienteDB=async function(id){
   window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
   try{ await deleteDoc(doc(db_fs,'clientes',id)); }catch(e){}
   try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
 };
-
+<br>
 window.importarMasivo=async function(clientes,reemplazar){
   actualizarIndicador('guardando');
   window._fbSaving=true;
@@ -146,85 +145,58 @@ window.importarMasivo=async function(clientes,reemplazar){
     return true;
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
 };
-
+<br>
 // -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
-
-  // 1. Intentar cargar desde localStorage primero (carga instantánea)
-  const local=localStorage.getItem('epsan_v3');
-  if(local){
-    try{
+  // Cargar config desde localStorage (instantaneo)
+  try{
+    const local=localStorage.getItem('epsan_v3');
+    if(local){
       const d=JSON.parse(local);
-      Object.assign(window.DB,d);
-      if(!window.DB.comercios) window.DB.comercios=[];
-      renderLista();
-      if(window.clienteActivo) renderFicha(); else renderWelcome();
-    }catch(e){}
-  }
-
-  // 2. Luego sincronizar con Firebase en segundo plano
+      if(d.entidades) window.DB.entidades=d.entidades;
+      if(d.carteras) window.DB.carteras=d.carteras;
+      if(d.comercios) window.DB.comercios=d.comercios;
+      if(d.estados) window.DB.estados=d.estados;
+    }
+  }catch(e){}
+  window.DB.clientes=[];
+  renderLista();
+  renderWelcome();
+  // Cargar config desde Firebase en segundo plano
   try {
-    // Cargar config (entidades, carteras, comercios) — documento pequeño
     const cfgSnap=await getDoc(CONFIG_REF);
     if(cfgSnap.exists()){
       const cfg=cfgSnap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades||[];
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
-      window.DB.estados=cfg.estados||window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
+      window.DB.estados=cfg.estados||window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
     }
-
-    // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
-    const cliSnap=await getDocs(CLIENTES_COL);
-    window.DB.clientes=[];
-    cliSnap.forEach(function(d){
-      try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
-    });
-    if(!window.DB.comercios) window.DB.comercios=[];
-
     window._fbConnected=true;
     actualizarIndicador('ok');
-
-    // Guardar en localStorage para próxima carga rápida
-    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
-
+    try{
+      const ldata=JSON.parse(localStorage.getItem('epsan_v3')||'{}');
+      ldata.entidades=window.DB.entidades;ldata.carteras=window.DB.carteras;
+      ldata.comercios=window.DB.comercios;ldata.estados=window.DB.estados;
+      localStorage.setItem('epsan_v3',JSON.stringify(ldata));
+    }catch(e){}
     renderLista();
-    if(window.clienteActivo) renderFicha(); else renderWelcome();
-
-    // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
-    // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
     onSnapshot(CONFIG_REF,function(snap){
       if(!snap.exists()) return;
       const cfg=snap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades;
       window.DB.carteras=cfg.carteras||window.DB.carteras;
       window.DB.comercios=cfg.comercios||window.DB.comercios;
+      window.DB.estados=cfg.estados||window.DB.estados;
     });
-
-    // 4. Botón para refrescar clientes manualmente si lo necesitan
-    window.refrescarClientes = async function(){
-      actualizarIndicador('conectando');
-      const snap=await getDocs(CLIENTES_COL);
-      window.DB.clientes=[];
-      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
-      try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
-      actualizarIndicador('ok');
-      renderLista();
-      if(window.clienteActivo) renderFicha(); else renderWelcome();
-    };
-
   } catch(e){
     console.error('Error Firebase:',e);
     window._fbConnected=false;
     actualizarIndicador('error');
-    // Fallback: usar lo que ya cargamos de localStorage
-    if(!window.DB.comercios) window.DB.comercios=[];
-    renderLista();
-    if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
 }
-
+<br>
 // -- AUTH STATE --
 onAuthStateChanged(auth, function(user){
   if(user){
@@ -238,8 +210,8 @@ onAuthStateChanged(auth, function(user){
     mostrarLogin();
   }
 });
-
-
+<br>
+<br>
 // -- saveMuchos: guardar multiples clientes en paralelo (4 batches a la vez) --
 window.saveMuchos = async function(clientes, config){
   window._fbSaving = true;
@@ -282,14 +254,14 @@ window.saveMuchos = async function(clientes, config){
     return false;
   }
 };
-
+<br>
 window._fbActualizarIndicador=actualizarIndicador;
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,sans-serif;background:#edf2f9;color:#1a1a1a;font-size:13px;height:100vh;display:flex;flex-direction:column}
 a{color:inherit;text-decoration:none}
-
+<br>
 /* LOGIN */
 #login-screen{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(135deg,#1a3a6b 0%,#2557a7 100%)}
 .login-box{background:#fff;border-radius:16px;padding:36px 32px;width:340px;box-shadow:0 8px 32px rgba(0,0,0,.18)}
@@ -303,7 +275,7 @@ a{color:inherit;text-decoration:none}
 .login-btn{width:100%;padding:10px;background:linear-gradient(135deg,#1e4a96,#2d63b8);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
 .login-btn:hover{background:linear-gradient(135deg,#2557a7,#3a78d0)}
 .login-btn:disabled{opacity:.6;cursor:not-allowed}
-
+<br>
 /* APP */
 #app{display:none;flex-direction:column;height:100vh}
 .topnav{background:linear-gradient(135deg,#1a3a6b 0%,#2557a7 100%);color:#fff;display:flex;align-items:center;height:44px;padding:0 16px;gap:4px;flex-shrink:0;border-bottom:2px solid #4a80d4}
@@ -316,7 +288,7 @@ a{color:inherit;text-decoration:none}
 #user-email{font-size:11px;color:#a8c4e8}
 .btn-logout{padding:3px 10px;border-radius:6px;border:1px solid #a8c4e8;background:transparent;color:#a8c4e8;font-size:11px;cursor:pointer}
 .btn-logout:hover{background:rgba(255,255,255,.15);color:#fff}
-
+<br>
 .body{display:flex;flex:1;overflow:hidden}
 .leftpanel{width:260px;background:#fff;border-right:1px solid #c8d8ec;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
 .leftpanel .lp-header{padding:10px;border-bottom:2px solid #dce8f5;background:linear-gradient(180deg,#e8f2fc 0%,#f4f8fd 100%);flex-shrink:0}
@@ -395,7 +367,7 @@ a{color:inherit;text-decoration:none}
 </style>
 </head>
 <body>
-
+<br>
 <!-- PANTALLA LOGIN -->
 <div id="login-screen">
   <div class="login-box">
@@ -413,7 +385,7 @@ a{color:inherit;text-decoration:none}
     <button class="login-btn" id="login-btn" onclick="loginEpsan()">Ingresar</button>
   </div>
 </div>
-
+<br>
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
@@ -430,7 +402,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn-logout" onclick="logoutEpsan()">Salir</button>
   </div>
 </div>
-
+<br>
 <div class="body">
 <div class="leftpanel" id="leftPanel">
   <div class="lp-header">
@@ -452,7 +424,7 @@ a{color:inherit;text-decoration:none}
 </div>
 </div>
 </div>
-
+<br>
 <!-- MODALES -->
 <div class="modal-overlay" id="modalCli"><div class="modal">
   <h3 id="mCliTit">Nuevo Cliente</h3>
@@ -472,7 +444,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-red" id="btnElimCli" onclick="eliminarCliente()" style="margin-left:auto;display:none">Eliminar cliente</button>
   </div>
 </div></div>
-
+<br>
 <div class="modal-overlay" id="modalCred"><div class="modal">
   <h3 id="mCredTit">Nuevo Cr&#233;dito</h3>
   <div class="g2" style="gap:10px;margin-bottom:10px">
@@ -490,7 +462,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-red" id="btnElimCred" onclick="eliminarCredito()" style="margin-left:auto;display:none">Eliminar</button>
   </div>
 </div></div>
-
+<br>
 <div class="modal-overlay" id="modalPlan"><div class="modal">
   <h3>Generar Plan de Pagos</h3>
   <div style="background:#f8f4e8;border:1px solid #e8d89a;border-radius:8px;padding:12px;margin-bottom:12px">
@@ -513,7 +485,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-outline" onclick="cerrarModal('modalPlan')">Cancelar</button>
   </div>
 </div></div>
-
+<br>
 <div class="modal-overlay" id="modalTr"><div class="modal">
   <h3>Nuevo Tr&#225;mite</h3>
   <div style="display:grid;gap:9px;margin-bottom:10px">
@@ -550,7 +522,7 @@ a{color:inherit;text-decoration:none}
     <div class="fld"><label>Observaciones</label><textarea id="com-datos" style="width:100%;padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;resize:vertical;min-height:60px;font-family:Arial" placeholder="Observaciones..."></textarea></div>
   </div>
   <div class="btn-row">
-    <button class="btn btn-dark" onclick="guardarComercioConsulta()">Guardar</button>
+    <button class="btn btn-dark" onclick="guardarComercio()">Guardar</button>
     <button class="btn btn-outline" onclick="cerrarModal('modalComercio')">Cancelar</button>
     <button class="btn btn-red" id="btnElimComercio" onclick="eliminarComercio()" style="margin-left:auto">Eliminar</button>
   </div>
@@ -588,7 +560,7 @@ a{color:inherit;text-decoration:none}
     <button class="btn btn-dark" onclick="cerrarModal('modalConfig');renderLista()">Listo</button>
   </div>
 </div></div>
-
+<br>
 <script>
 // ===================================================
 // BASE DE DATOS LOCAL
@@ -674,19 +646,56 @@ function renderLista(){
   }).join('');
 }
 
-function buscarLista(){ renderLista(); }
+// Busqueda con debounce
+var _buscarTimer=null;
+function buscarLista(){
+  clearTimeout(_buscarTimer);
+  _buscarTimer=setTimeout(function(){
+    const q=(document.getElementById('srchInput').value||'').trim();
+    if(q.length>=3){
+      buscarEnFirebase(q);
+    } else if(q.length===0){
+      window.DB.clientes=[];
+      renderLista();
+    }
+  },500);
+}
+
+async function buscarEnFirebase(q){
+  if(!window._fbConnected) return;
+  actualizarIndicador('guardando');
+  try {
+    const snap=await getDocs(CLIENTES_COL);
+    const qNorm=q.toLowerCase().replace(/\./, '');
+    window.DB.clientes=[];
+    snap.forEach(function(d){
+      try{
+        const c=JSON.parse(d.data().data);
+        const dniNorm=(c.dni||'').replace(/\./g,'');
+        const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+        if(txt.includes(qNorm)) window.DB.clientes.push(c);
+      }catch(e){}
+    });
+    actualizarIndicador('ok');
+    renderLista();
+  } catch(e){
+    console.error('Error buscando:',e);
+    actualizarIndicador('error');
+  }
+}
 
 function irPrimerResultado(){
   const q=(document.getElementById('srchInput').value||'').toLowerCase();
   if(!q) return;
-  const encontrado = DB.clientes.find(c=>{
+  const encontrado=DB.clientes.find(function(c){
     const qNorm=q.replace(/\./g,'');
     const dniNorm=(c.dni||'').replace(/\./g,'');
-    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(x=>x.num).join('')).toLowerCase();
+    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
     return txt.includes(qNorm);
   });
   if(encontrado){ selCliente(encontrado.id); setTabAdmin('datos'); }
 }
+
 
 function selCliente(id){
   clienteActivo = DB.clientes.find(c=>c.id===id);
@@ -1611,7 +1620,7 @@ function renderConsultas(){
   document.getElementById('mainArea').innerHTML=`
   <div class="tabbar" id="consultaTabbar">
     <div class="tb active" onclick="setTabConsulta('contacto',this)">&#128222; Último contacto</div>
-    
+    <div class="tb" onclick="setTabConsulta('cobrables',this)">&#11088; Cuentas cobrables</div>
     <div class="tb" onclick="setTabConsulta('comercios',this)">&#127981; Comercios</div>
   </div>
   <div class="tabcontent" id="consultaContent"></div>`;
@@ -1623,6 +1632,7 @@ function setTabConsulta(tab, el){
   if(bar) bar.querySelectorAll('.tb').forEach(function(t){t.classList.remove('active');});
   if(el) el.classList.add('active');
   if(tab==='contacto') renderConsultaContacto();
+  else if(tab==='cobrables') renderConsultaCobrables();
   else renderComerciosConsulta();
 }
 function renderConsultaPromesas(){
@@ -1640,70 +1650,7 @@ function renderConsultaPromesas(){
     <div id="res-promesas"></div>
   </div>`;
 }
-function renderComerciosConsulta(){
-  var el=document.getElementById('consultaContent');
-  var comercios=DB.comercios||[];
-  el.innerHTML='<div class="card">'+
-    '<div class="card-hdr"><div class="card-title">Comercios</div>'+
-    '<button class="btn btn-dark btn-sm" onclick="abrirModalComercioConsulta(-1)">+ Nuevo</button></div>'+
-    (comercios.length?
-      '<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel&eacute;fono</th><th>Mail</th><th>Observaciones</th><th></th></tr></thead><tbody>'+
-      comercios.map(function(c,i){
-        return '<tr>'+
-          '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
-          '<td>'+(c.producto||'&mdash;')+'</td>'+
-          '<td>'+(c.localidad||'&mdash;')+'</td>'+
-          '<td>'+(c.telefono||'&mdash;')+'</td>'+
-          '<td>'+(c.mail||'&mdash;')+'</td>'+
-          '<td style="max-width:200px;font-size:11px">'+(c.datos||'&mdash;')+'</td>'+
-          '<td><button class="btn btn-outline btn-sm" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
-        '</tr>';
-      }).join('')+'</tbody></table>'
-    :'<div style="color:#aaa;font-size:13px;padding:10px">Sin comercios cargados</div>')+
-  '</div>';
-}
 
-var _idxComercio=null;
-function abrirModalComercioConsulta(i){
-  _idxComercio=i;
-  var c=i>=0?(DB.comercios||[])[i]:{};
-  document.getElementById('com-nombre').value=c.nombre||'';
-  document.getElementById('com-producto').value=c.producto||'';
-  document.getElementById('com-direccion').value=c.direccion||'';
-  document.getElementById('com-localidad').value=c.localidad||'';
-  document.getElementById('com-telefono').value=c.telefono||'';
-  document.getElementById('com-mail').value=c.mail||'';
-  document.getElementById('com-datos').value=c.datos||'';
-  document.getElementById('mComTit').textContent=i>=0?'Editar Comercio':'Nuevo Comercio';
-  document.getElementById('btnElimComercio').style.display=i>=0?'block':'none';
-  document.getElementById('modalComercio').classList.add('open');
-}
-function guardarComercioConsulta(){
-  var datos={
-    nombre:document.getElementById('com-nombre').value.trim(),
-    producto:document.getElementById('com-producto').value.trim(),
-    direccion:document.getElementById('com-direccion').value.trim(),
-    localidad:document.getElementById('com-localidad').value.trim(),
-    telefono:document.getElementById('com-telefono').value.trim(),
-    mail:document.getElementById('com-mail').value.trim(),
-    datos:document.getElementById('com-datos').value.trim()
-  };
-  if(!datos.nombre){alert('El nombre es obligatorio');return;}
-  if(!DB.comercios) DB.comercios=[];
-  if(_idxComercio>=0) DB.comercios[_idxComercio]=datos;
-  else DB.comercios.push(datos);
-  saveDBConfig();
-  cerrarModal('modalComercio');
-  renderComerciosConsulta();
-}
-function eliminarComercioConsulta(){
-  if(_idxComercio<0) return;
-  if(!confirm('Eliminar este comercio?')) return;
-  DB.comercios.splice(_idxComercio,1);
-  saveDBConfig();
-  cerrarModal('modalComercio');
-  renderComerciosConsulta();
-}
 function filtrarPromesas(){
   const ent=document.getElementById('cp-ent').value;
   const car=document.getElementById('cp-car').value;
@@ -1744,8 +1691,301 @@ function renderConsultaContacto(){
     <div id="res-contacto"></div>
   </div>`;
 }
+function renderConsultaCobrables(){
+  var el=document.getElementById('consultaContent');
+  el.innerHTML=`
+  <div class="card">
+    <div class="card-hdr">
+      <div class="card-title">&#11088; Cuentas más cobrables</div>
+      <button class="btn btn-green btn-sm" onclick="exportarCobrables()">&#128229; Exportar Excel</button>
+    </div>
+    <div class="adv-filters">
+      <div class="fld"><label>Entidad</label>
+        <select id="cob-ent" onchange="calcularCobrables()">
+          <option value="">Todas</option>
+          ${(DB.entidades||[]).map(function(e){return '<option>'+e+'</option>';}).join('')}
+        </select>
+      </div>
+      <div class="fld"><label>Cartera</label>
+        <select id="cob-car" onchange="calcularCobrables()">
+          <option value="">Todas</option>
+          ${(DB.carteras||[]).map(function(c){var n=typeof c==='object'?c.nombre:c;return '<option>'+n+'</option>';}).join('')}
+        </select>
+      </div>
+      <div class="fld"><label>Estado</label>
+        <select id="cob-est" onchange="calcularCobrables()">
+          <option value="">Todos</option>
+          <option>Pendiente</option><option>En acuerdo</option><option>Sin contacto</option>
+        </select>
+      </div>
+      <div class="fld"><label>Mostrar top</label>
+        <select id="cob-top" onchange="calcularCobrables()">
+          <option value="50">Top 50</option>
+          <option value="100">Top 100</option>
+          <option value="200">Top 200</option>
+          <option value="0">Todos</option>
+        </select>
+      </div>
+    </div>
+    <div id="cob-resultado"></div>
+  </div>`;
+  calcularCobrables();
+}
 
+function calcularCobrables(){
+  var ent=(document.getElementById('cob-ent')||{value:''}).value;
+  var car=(document.getElementById('cob-car')||{value:''}).value;
+  var est=(document.getElementById('cob-est')||{value:''}).value;
+  var top=parseInt((document.getElementById('cob-top')||{value:'50'}).value)||50;
+  var fHoy=new Date();
 
+  var fil=DB.clientes.filter(function(c){
+    if(c.estado==='Cancelado') return false;
+    if(est&&c.estado!==est) return false;
+    var enEnt=!ent||(c.creditos||[]).some(function(x){return x.entidad===ent;})||c.entidad===ent;
+    var enCar=!car||(c.creditos||[]).some(function(x){
+      var n=typeof x.cartera==='object'?x.cartera.nombre:x.cartera;
+      return n===car;
+    })||c.cartera===car;
+    return enEnt&&enCar;
+  });
+
+  // Calcular puntaje
+  var scored=fil.map(function(c){
+    var score=0;
+    var capital=(c.creditos||[]).reduce(function(s,cr){return s+(parseFloat(cr.capital)||0);},0);
+    var tramites=c.tramites||[];
+    var tels=(c.telefonos||[]).filter(function(t){return t&&t.trim();}).length;
+
+    // Dias de mora del primer credito
+    var diasMora=0;
+    if(c.creditos&&c.creditos[0]&&c.creditos[0].fecha){
+      var f=c.creditos[0].fecha.toString().trim();
+      var partes=f.split(/[\/\-]/);
+      var fVto=fHoy;
+      if(partes.length===3){
+        var d=parseInt(partes[0]),m=parseInt(partes[1])-1,y=parseInt(partes[2]);
+        if(y<100) y+=2000;
+        fVto=new Date(y,m,d);
+      }
+      diasMora=Math.max(0,Math.round((fHoy-fVto)/(1000*60*60*24)));
+    }
+
+    // 1. Antigüedad: menos días = mejor (max 30 pts)
+    if(diasMora<=365) score+=30;
+    else if(diasMora<=730) score+=20;
+    else if(diasMora<=1095) score+=10;
+    else score+=2;
+
+    // 2. Capital equilibrado: entre 5k y 100k ideal (max 25 pts)
+    if(capital>=5000&&capital<=50000) score+=25;
+    else if(capital>50000&&capital<=150000) score+=20;
+    else if(capital>150000&&capital<=300000) score+=12;
+    else if(capital>300000) score+=6;
+    else score+=3;
+
+    // 3. Trámites recientes = respondieron (max 25 pts)
+    if(tramites.length>0){
+      var ultTr=new Date(tramites[tramites.length-1].fechaHora||'');
+      var diasDesdeUlt=Math.round((fHoy-ultTr)/(1000*60*60*24));
+      if(diasDesdeUlt<=30) score+=25;
+      else if(diasDesdeUlt<=90) score+=18;
+      else if(diasDesdeUlt<=180) score+=10;
+      else score+=5;
+    }
+
+    // 4. Tiene teléfono (max 10 pts)
+    if(tels>=2) score+=10;
+    else if(tels===1) score+=6;
+
+    // 5. Estado (max 10 pts)
+    if(c.estado==='En acuerdo') score+=10;
+    else if(c.estado==='Pendiente') score+=7;
+    else score+=2;
+
+    // Estrellas visuales
+    var estrellas=score>=80?'⭐⭐⭐':score>=60?'⭐⭐':score>=40?'⭐':'·';
+
+    return {c:c, score:score, capital:capital, diasMora:diasMora, tels:tels, tramites:tramites.length, estrellas:estrellas};
+  });
+
+  scored.sort(function(a,b){return b.score-a.score;});
+  var lista=top>0?scored.slice(0,top):scored;
+  window._lastCobrables=lista;
+
+  var el=document.getElementById('cob-resultado');
+  if(!lista.length){el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px">Sin resultados</div>';return;}
+
+  el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">'+lista.length+' cuenta/s  ·  <em>Ordenadas por probabilidad de cobro</em></div>'+
+    '<div style="overflow-x:auto">'+
+    '<table class="tbl"><thead><tr>'+
+    '<th>#</th><th>Puntaje</th><th>Nombre</th><th>DNI</th><th>Capital</th><th>D\u00edas mora</th><th>Tr\u00e1mites</th><th>Tels</th><th>Estado</th>'+
+    '</tr></thead><tbody>'+
+    lista.map(function(item,i){
+      var c=item.c;
+      var sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
+      return '<tr onclick="selCliente(\''+c.id+'\');setMod(\'admin\',document.querySelectorAll(\'.mb\')[0]);setTabAdmin(\'cuenta\')">'+
+        '<td style="color:#888">'+(i+1)+'</td>'+
+        '<td><span style="font-size:13px">'+item.estrellas+'</span> <strong style="color:#1a3a6b">'+item.score+'</strong></td>'+
+        '<td>'+( c.nombre||'—')+'</td>'+
+        '<td>'+( c.dni||'—')+'</td>'+
+        '<td style="font-weight:600">$'+(item.capital?Math.round(item.capital).toLocaleString('es-AR'):'—')+'</td>'+
+        '<td>'+(item.diasMora||'—')+'</td>'+
+        '<td style="text-align:center">'+(item.tramites||0)+'</td>'+
+        '<td style="text-align:center">'+(item.tels||0)+'</td>'+
+        '<td><span class="badge '+sc+'">'+( c.estado||'—')+'</span></td>'+
+      '</tr>';
+    }).join('')+
+    '</tbody></table></div>';
+}
+
+function exportarCobrables(){
+  var lista=window._lastCobrables||[];
+  if(!lista.length){alert('Calculá primero las cuentas cobrables');return;}
+  var rows=lista.map(function(item,i){
+    var c=item.c;
+    return {
+      Ranking:i+1, Puntaje:item.score, Estrellas:item.estrellas,
+      Nombre:c.nombre, DNI:c.dni,
+      Telefono:(c.telefonos||[])[0]||'',
+      Capital:item.capital, DiasMora:item.diasMora,
+      Tramites:item.tramites, Estado:c.estado,
+      Entidad:(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'',
+      Cartera:(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||''
+    };
+  });
+  var ws=XLSX.utils.json_to_sheet(rows);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Cobrables');
+  var wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  var blob=new Blob([wbout],{type:'application/octet-stream'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='cuentas_cobrables.xlsx';
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);
+}
+function renderComerciosConsulta(){
+  var el=document.getElementById('consultaContent');
+  var comercios=DB.comercios||[];
+  el.innerHTML='<div class="card">'+
+    '<div class="card-hdr">'+
+    '<div class="card-title">&#127981; Comercios</div>'+
+    '<button class="btn btn-dark btn-sm" onclick="abrirNuevoComercio()">+ Nuevo</button>'+
+    '</div>'+
+    (comercios.length?
+      '<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel\u00e9fono</th><th>Mail</th><th>Observaciones</th><th></th></tr></thead><tbody>'+
+      comercios.map(function(c,i){
+        return '<tr>'+
+          '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
+          '<td>'+(c.producto||'&mdash;')+'</td>'+
+          '<td>'+(c.localidad||'&mdash;')+'</td>'+
+          '<td>'+(c.telefono||'&mdash;')+'</td>'+
+          '<td>'+(c.mail||'&mdash;')+'</td>'+
+          '<td style="max-width:200px;font-size:11px;color:#666">'+(c.datos||'&mdash;')+'</td>'+
+'<td><button class="btn btn-outline btn-sm" onclick="editarComercio('+i+')">&#9998;</button></td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table>'
+    :'<div style="color:#aaa;font-size:13px;padding:10px">Sin comercios cargados</div>')+
+  '</div>';
+}
+var _editComercioIdx=null;
+function abrirNuevoComercio(){
+  _editComercioIdx=null;
+  ['nombre','producto','direccion','localidad','telefono','mail','datos'].forEach(function(f){
+    var el=document.getElementById('com-'+f);
+    if(el) el.value='';
+  });
+  var mTit=document.getElementById('mComTit');
+  if(mTit) mTit.textContent='Nuevo Comercio';
+  var btnElim=document.getElementById('btnElimComercio');
+  if(btnElim) btnElim.style.display='none';
+  document.getElementById('modalComercio').classList.add('open');
+}
+function abrirNuevoComercio(){
+  _editComercioIdx=null;
+  ['nombre','producto','direccion','localidad','telefono','mail','datos'].forEach(function(f){
+    var el=document.getElementById('com-'+f);
+    if(el) el.value='';
+  });
+  document.getElementById('mComTit').textContent='Nuevo Comercio';
+  document.getElementById('btnElimComercio').style.display='none';
+  document.getElementById('modalComercio').classList.add('open');
+}
+function editarComercio(i){
+  _editComercioIdx=i;
+  var c=DB.comercios[i];
+  document.getElementById('com-nombre').value=c.nombre||'';
+  document.getElementById('com-producto').value=c.producto||'';
+  document.getElementById('com-direccion').value=c.direccion||'';
+  document.getElementById('com-localidad').value=c.localidad||'';
+  document.getElementById('com-telefono').value=c.telefono||'';
+  document.getElementById('com-mail').value=c.mail||'';
+  document.getElementById('com-datos').value=c.datos||'';
+  document.getElementById('mComTit').textContent='Editar Comercio';
+  document.getElementById('btnElimComercio').style.display='block';
+  document.getElementById('modalComercio').classList.add('open');
+}
+function guardarComercio(){
+  var datos={
+    nombre:document.getElementById('com-nombre').value.trim(),
+    producto:document.getElementById('com-producto').value.trim(),
+    direccion:document.getElementById('com-direccion').value.trim(),
+    localidad:document.getElementById('com-localidad').value.trim(),
+    telefono:document.getElementById('com-telefono').value.trim(),
+    mail:document.getElementById('com-mail').value.trim(),
+    datos:document.getElementById('com-datos').value.trim()
+  };
+  if(!datos.nombre){alert('El nombre es obligatorio');return;}
+  if(!DB.comercios) DB.comercios=[];
+  if(_editComercioIdx!==null){
+    DB.comercios[_editComercioIdx]=datos;
+  } else {
+    DB.comercios.push(datos);
+  }
+  saveDBConfig();
+  cerrarModal('modalComercio');
+  renderComerciosConsulta();
+}
+function eliminarComercio(){
+  if(_editComercioIdx===null) return;
+  if(!confirm('¿Eliminar este comercio?')) return;
+  DB.comercios.splice(_editComercioIdx,1);
+  saveDBConfig();
+  cerrarModal('modalComercio');
+  renderComerciosConsulta();
+}
+function filtrarContacto(){
+  const ent=document.getElementById('cc-ent').value;
+  const car=document.getElementById('cc-car').value;
+  const desde=document.getElementById('cc-desde').value;
+  const hasta=document.getElementById('cc-hasta').value;
+  const est=document.getElementById('cc-est').value;
+  const rows=DB.clientes.filter(c=>{
+    const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
+    const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
+    if(!enEnt||!enCar) return false;
+    if(est&&c.estado!==est) return false;
+    const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
+    const f=ult?ult.fechaHora.slice(0,10):'';
+    if(desde&&(!f||f<desde)) return false;
+    if(hasta&&(!f||f>hasta)) return false;
+    return true;
+  });
+  const el=document.getElementById('res-contacto');
+  if(!rows.length){el.innerHTML='<div style="color:#aaa;font-size:12px;margin-top:10px">Sin resultados</div>';return;}
+  el.innerHTML=`<div style="font-size:11px;color:#888;margin:8px 0">${rows.length} resultado/s</div>
+  <table class="tbl"><thead><tr><th>Cliente</th><th>DNI</th><th>Estado</th><th>Último contacto</th><th>Tipo</th></tr></thead><tbody>`+
+  rows.map(c=>{
+    const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
+    return `<tr onclick="selCliente('${c.id}');setMod('admin',document.querySelectorAll('.mb')[0]);setTabAdmin('tramites')">
+      <td>${c.nombre}</td><td>${c.dni}</td>
+      <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado}</span></td>
+      <td>${ult?ult.fechaHora:'—'}</td><td>${ult?ult.tipo:'—'}</td>
+    </tr>`;
+  }).join('')+'</tbody></table>';
+}
 
 // ===================================================
 // HERRAMIENTAS
