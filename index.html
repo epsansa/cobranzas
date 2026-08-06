@@ -596,6 +596,12 @@ function setMod(mod, el){
 function renderLista(){
   // Poblar selects
   poblarSelect('fEnt', DB.entidades, 'Todas las entidades');
+  // No mostrar lista si no hay busqueda activa
+  const qActual=(document.getElementById('srchInput').value||'').trim();
+  if(qActual.length<3 && !document.getElementById('fEnt').value && !document.getElementById('fCar').value && !document.getElementById('fEst').value){
+    document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Ingres\u00e1 al menos 3 caracteres para buscar</div>';
+    return;
+  }
   const fEstActual=document.getElementById('fEst').value;
   const estados=DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
   const selEst=document.getElementById('fEst');
@@ -621,7 +627,7 @@ function renderLista(){
   const fCar=document.getElementById('fCar').value;
   const fEst=document.getElementById('fEst').value;
 
-  const fil = DB.clientes.filter(c=>{
+  const fil = (DB.clientes||[]).filter
     const qNorm=q.replace(/\./g,'');
     const dniNorm=(c.dni||'').replace(/\./g,'');
     const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(x=>x.num).join('')).toLowerCase();
@@ -631,7 +637,15 @@ function renderLista(){
   });
 
   const el=document.getElementById('clientList');
-  if(!fil.length){el.innerHTML='<div style="padding:18px;text-align:center;color:#aaa;font-size:12px">Sin resultados</div>';return;}
+  if(!fil.length && (document.getElementById('srchInput').value||'').length>=3){
+    el.innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Sin resultados para esa b\u00fasqueda</div>';
+    return;
+  }
+  if(!fil.length){
+    el.innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Ingres\u00e1 al menos 3 caracteres para buscar</div>';
+    return;
+  }
+  if(true){
   el.innerHTML=fil.map(c=>{
     const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
     const sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
