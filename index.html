@@ -125,13 +125,7 @@ window.importarMasivo=async function(clientes,reemplazar){
   window._fbSaving=true;
   try {
     if(reemplazar){
-      const snap=await getDocs(CLIENTES_COL);
-      const BSIZ=450; const docs=snap.docs;
-      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); await b.commit(); }
-      window.DB.clientes=clientes;
-    } else {
-      window.DB.clientes=[...window.DB.clientes,...clientes];
-    }
+      
     const BSIZ=450;
     for(let i=0;i<clientes.length;i+=BSIZ){
       const b=writeBatch(db_fs);
@@ -681,8 +675,6 @@ async function buscarEnFirebase(q){
     var snap=await getDocs(CLIENTES_COL);
     var qNorm=q.toLowerCase().replace(/\./g,'');
     window.DB.clientes=[];
-    snap.forEach(function(d){
-      try{
         var c=JSON.parse(d.data().data);
         var dniNorm=(c.dni||'').replace(/\./g,'');
         var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
