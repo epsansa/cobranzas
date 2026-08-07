@@ -175,12 +175,7 @@ async function cargarDatos(){
       window.DB.estados=cfg.estados||window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
     }
 
-    // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
-    const cliSnap=await getDocs(CLIENTES_COL);
     window.DB.clientes=[];
-    cliSnap.forEach(function(d){
-      try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
-    });
     if(!window.DB.comercios) window.DB.comercios=[];
 
     window._fbConnected=true;
@@ -659,7 +654,11 @@ function renderLista(){
   });
 
   const el=document.getElementById('clientList');
-  if(!fil.length){el.innerHTML='<div style="padding:18px;text-align:center;color:#aaa;font-size:12px">Sin resultados</div>';return;}
+  if(!fil.length){
+    var srch=(document.getElementById('srchInput').value||'').trim();
+    el.innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">'+(srch.length>=3?'Sin resultados para esa búsqueda':'Ingresá al menos 3 caracteres para buscar')+'</div>';
+    return;
+  }
   el.innerHTML=fil.map(c=>{
     const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
     const sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
@@ -674,15 +673,47 @@ function renderLista(){
   }).join('');
 }
 
-function buscarLista(){ renderLista(); }
-
+var _buscarTimer=null;
+function buscarLista(){
+  clearTimeout(_buscarTimer);
+  _buscarTimer=setTimeout(function(){
+    var q=(document.getElementById('srchInput').value||'').trim();
+    if(q.length>=3){
+      buscarEnFirebase(q);
+    } else if(q.length===0){
+      window.DB.clientes=[];
+      renderLista();
+    }
+  },500);
+}
+async function buscarEnFirebase(q){
+  actualizarIndicador('guardando');
+  try {
+    var snap=await getDocs(CLIENTES_COL);
+    var qNorm=q.toLowerCase().replace(/\./g,'');
+    window.DB.clientes=[];
+    snap.forEach(function(d){
+      try{
+        var c=JSON.parse(d.data().data);
+        var dniNorm=(c.dni||'').replace(/\./g,'');
+        var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+        if(txt.includes(qNorm)) window.DB.clientes.push(c);
+      }catch(e){}
+    });
+    actualizarIndicador('ok');
+    renderLista();
+  } catch(e){
+    console.error('Error buscando:',e);
+    actualizarIndicador('error');
+  }
+}
 function irPrimerResultado(){
-  const q=(document.getElementById('srchInput').value||'').toLowerCase();
+  var q=(document.getElementById('srchInput').value||'').toLowerCase();
   if(!q) return;
-  const encontrado = DB.clientes.find(c=>{
-    const qNorm=q.replace(/\./g,'');
-    const dniNorm=(c.dni||'').replace(/\./g,'');
-    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(x=>x.num).join('')).toLowerCase();
+  var encontrado=DB.clientes.find(function(c){
+    var qNorm=q.replace(/\./g,'');
+    var dniNorm=(c.dni||'').replace(/\./g,'');
+    var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
     return txt.includes(qNorm);
   });
   if(encontrado){ selCliente(encontrado.id); setTabAdmin('datos'); }
@@ -708,7 +739,7 @@ const TABS_ADMIN = [
   {id:'datos',label:'Datos cliente'},
   {id:'cuenta',label:'Cuenta corriente'},
   {id:'tramites',label:'Trámites'},
-  {id:'busqueda',label:'Búsqueda'},
+  
   {id:'obs',label:'Observaciones'},
   {id:'dashboard',label:'Dashboard'},
 ];
