@@ -923,7 +923,9 @@ function renderCuenta(){
               bg='background:#fffbe8;border-left:3px solid #e8c030;';
             }
             if(p.pagada){
-              bg= esAnticipo ? 'background:#fffbe8;' : ''; estadoTxt='✅ Pagada'; btnCls='btn-outline';
+              bg= esAnticipo ? 'background:#fffbe8;' : ''; estadoTxt='✅ Pagada'+(p.montoPagado?' ($'+Math.round(p.montoPagado).toLocaleString('es-AR')+')':''); btnCls='btn-outline';
+            } else if(p.pagadaParcial){
+              bg='background:#FAEEDA;border-left:3px solid #e09020;'; estadoTxt='⚠️ A cuenta — Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR'); btnCls='btn-red';
             } else if(p.vto < hoy){
               bg='background:#FCEBEB;border-left:3px solid #e05555;'; estadoTxt='🔴 Vencida'; btnCls='btn-red';
             } else if(p.vto <= new Date(new Date().setDate(new Date().getDate()+7)).toISOString().slice(0,10)){
@@ -937,7 +939,10 @@ function renderCuenta(){
               '<div>'+p.vto+'</div>'+
               '<div>$'+parseFloat(p.monto||0).toLocaleString('es-AR')+'</div>'+
               '<div>'+estadoTxt+'</div>'+
-              '<div><button class="btn btn-sm '+btnCls+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':'Pagar')+'</button></div>'+
+              '<div>'+
+              (p.pagadaParcial?'<div style="font-size:10px;color:#854F0B;margin-bottom:2px">Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR')+'</div>':'')+ 
+              '<button class="btn btn-sm '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
+              '</div>'+
             '</div>';
           }).join('');
         })()}
@@ -1480,10 +1485,53 @@ function guardarPlan(){
 }
 
 function toggleCuota(ci,pi){
-  const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
-  DB.clientes[idx].creditos[ci].plan[pi].pagada=!DB.clientes[idx].creditos[ci].plan[pi].pagada;
+  var cuota=clienteActivo.creditos[ci].plan[pi];
+  if(cuota.pagada||cuota.pagadaParcial){
+    if(!confirm('\u00bfDeshacer el pago de esta cuota?')) return;
+    var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
+    var p=DB.clientes[idx].creditos[ci].plan[pi];
+    p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;
+    clienteActivo=DB.clientes[idx];
+    saveDB(clienteActivo);setTabAdmin('cuenta');
+  } else {
+    window._pagoCI=ci;window._pagoPI=pi;
+    var monto=cuota.monto||0;
+    document.getElementById('pago-monto').value=monto;
+    document.getElementById('pago-fecha').value=new Date().toISOString().slice(0,10);
+    document.getElementById('pago-nota').value='';
+    document.getElementById('pago-original').textContent='$'+Math.round(monto).toLocaleString('es-AR');
+    document.getElementById('pago-diferencia').textContent='\u2014';
+    document.getElementById('pago-diferencia').style.color='#555';
+    document.getElementById('modalPago').classList.add('open');
+  }
+}
+function calcDiferenciaPago(){
+  var cuota=clienteActivo.creditos[window._pagoCI].plan[window._pagoPI];
+  var monto=parseFloat(document.getElementById('pago-monto').value)||0;
+  var original=cuota.monto||0;
+  var dif=monto-original;
+  var el=document.getElementById('pago-diferencia');
+  if(Math.abs(dif)<1){ el.textContent='Pago exacto'; el.style.color='#27500A'; }
+  else if(dif<0){ el.textContent='A cuenta \u2014 saldo: $'+Math.round(Math.abs(dif)).toLocaleString('es-AR'); el.style.color='#854F0B'; }
+  else { el.textContent='Con recargo: +$'+Math.round(dif).toLocaleString('es-AR'); el.style.color='#1a4a8a'; }
+}
+function confirmarPago(){
+  var monto=parseFloat(document.getElementById('pago-monto').value)||0;
+  var fecha=document.getElementById('pago-fecha').value;
+  var nota=document.getElementById('pago-nota').value.trim();
+  if(!monto){alert('Ingres\u00e1 el monto');return;}
+  var ci=window._pagoCI;var pi=window._pagoPI;
+  var cuota=clienteActivo.creditos[ci].plan[pi];
+  var original=cuota.monto||0;
+  var dif=monto-original;
+  var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
+  var p=DB.clientes[idx].creditos[ci].plan[pi];
+  p.montoPagado=monto;p.fechaPago=fecha;p.notaPago=nota;
+  if(Math.abs(dif)<1){ p.pagada=true;p.pagadaParcial=false;p.saldo=0; }
+  else if(dif<0){ p.pagada=false;p.pagadaParcial=true;p.saldo=Math.abs(dif); }
+  else { p.pagada=true;p.pagadaParcial=false;p.saldo=0;p.recargo=dif; }
   clienteActivo=DB.clientes[idx];
-  saveDB(clienteActivo);setTabAdmin('cuenta');
+  saveDB(clienteActivo);cerrarModal('modalPago');setTabAdmin('cuenta');
 }
 
 // -- TRÁMITES --
@@ -2558,5 +2606,30 @@ function ejecutarRenombradoCarteras(){
 // Cerrar modales
 document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
 </script>
+
+<div class="modal-overlay" id="modalPago">
+<div class="modal">
+  <h3>Registrar Pago</h3>
+  <div style="background:#f4f8fd;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px">
+    <div>Cuota original: <strong id="pago-original">—</strong></div>
+    <div style="margin-top:5px">Diferencia: <strong id="pago-diferencia">—</strong></div>
+  </div>
+  <div style="display:grid;gap:10px;margin-bottom:14px">
+    <div class="fld"><label>Monto cobrado ($)</label>
+      <input type="number" id="pago-monto" oninput="calcDiferenciaPago()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none">
+    </div>
+    <div class="fld"><label>Fecha de pago</label>
+      <input type="date" id="pago-fecha" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">
+    </div>
+    <div class="fld"><label>Nota / Detalle</label>
+      <textarea id="pago-nota" placeholder="Ej: Pago parcial, acuerdo telefónico..." style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:12px;outline:none;resize:vertical;min-height:60px;font-family:Arial"></textarea>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-dark" onclick="confirmarPago()">Confirmar pago</button>
+    <button class="btn btn-outline" onclick="cerrarModal('modalPago')">Cancelar</button>
+  </div>
+</div>
+</div>
 </body>
 </html>
