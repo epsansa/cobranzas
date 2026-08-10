@@ -1723,26 +1723,42 @@ function renderComerciosConsulta(){
   var el=document.getElementById('consultaContent');
   var comercios=DB.comercios||[];
   el.innerHTML='<div class="card">'+
-    '<div class="card-hdr"><div class="card-title">Comercios</div>'+
+    '<div class="card-hdr"><div class="card-title">Comercios ('+comercios.length+')</div>'+
     '<button class="btn btn-dark btn-sm" onclick="abrirModalComercioConsulta(-1)">+ Nuevo</button></div>'+
-    (comercios.length?
-      '<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel&eacute;fono</th><th>Mail</th><th>Observaciones</th><th></th></tr></thead><tbody>'+
-      comercios.map(function(c,i){
-        return '<tr>'+
-          '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
-          '<td>'+(c.producto||'&mdash;')+'</td>'+
-          '<td>'+(c.localidad||'&mdash;')+'</td>'+
-          '<td>'+(c.telefono||'&mdash;')+'</td>'+
-          '<td>'+(c.mail||'&mdash;')+'</td>'+
-          '<td style="max-width:200px;font-size:11px">'+(c.datos||'&mdash;')+'</td>'+
-          '<td><button class="btn btn-outline btn-sm" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
-        '</tr>';
-      }).join('')+'</tbody></table>'
-    :'<div style="color:#aaa;font-size:13px;padding:10px">Sin comercios cargados</div>')+
+    '<div style="margin-bottom:12px">'+
+    '<input id="com-search" placeholder="Buscar por nombre de comercio..." oninput="filtrarComerciosConsulta()" '+
+    'style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">'+
+    '</div>'+
+    '<div id="com-tabla"></div>'+
   '</div>';
+  filtrarComerciosConsulta();
 }
 
-var _idxComercio=null;
+function filtrarComerciosConsulta(){
+  var q=(document.getElementById('com-search').value||'').toLowerCase().trim();
+  var comercios=DB.comercios||[];
+  var fil=q?comercios.filter(function(c){ return (c.nombre||'').toLowerCase().includes(q)||(c.localidad||'').toLowerCase().includes(q)||(c.producto||'').toLowerCase().includes(q); }):comercios;
+  var el=document.getElementById('com-tabla');
+  if(!el) return;
+  if(!fil.length){
+    el.innerHTML='<div style="color:#aaa;font-size:13px;padding:10px">'+( q?'Sin resultados para "'+q+'"':'Sin comercios cargados')+'</div>';
+    return;
+  }
+  el.innerHTML='<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel&eacute;fono</th><th>Mail</th><th>Observaciones</th><th></th></tr></thead><tbody>'+
+    fil.map(function(c){
+      var i=comercios.indexOf(c);
+      return '<tr>'+
+        '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
+        '<td>'+(c.producto||'&mdash;')+'</td>'+
+        '<td>'+(c.localidad||'&mdash;')+'</td>'+
+        '<td>'+(c.telefono||'&mdash;')+'</td>'+
+        '<td>'+(c.mail||'&mdash;')+'</td>'+
+        '<td style="max-width:200px;font-size:11px">'+(c.datos||'&mdash;')+'</td>'+
+        '<td><button class="btn btn-outline btn-sm" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
+      '</tr>';
+    }).join('')+'</tbody></table>';
+}
+
 function abrirModalComercioConsulta(i){
   _idxComercio=i;
   var c=i>=0?(DB.comercios||[])[i]:{};
