@@ -128,106 +128,119 @@ window.importarMasivo=async function(clientes,reemplazar){
     if(reemplazar){
       const snap=await getDocs(CLIENTES_COL);
       const BSIZ=450; const docs=snap.docs;
-      const delP=[];
-      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); delP.push(b.commit()); }
-      await Promise.all(delP);
+      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); await b.commit(); }
       window.DB.clientes=clientes;
     } else {
       window.DB.clientes=[...window.DB.clientes,...clientes];
     }
     const BSIZ=450;
-    const saveP=[];
     for(let i=0;i<clientes.length;i+=BSIZ){
       const b=writeBatch(db_fs);
-      clientes.slice(i,i+BSIZ).forEach(c=>{
-        if(!c.id) c.id='c_'+Date.now()+'_'+Math.random().toString(36).slice(2);
-        b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()});
-      });
-      saveP.push(b.commit());
-      actualizarIndicador('guardando',Math.min(i+BSIZ,clientes.length)+'/'+clientes.length);
+      clientes.slice(i,i+BSIZ).forEach(c=>{ if(!c.id) c.id='c_'+Date.now()+'_'+Math.random().toString(36).slice(2); b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()}); });
+      await b.commit();
+      actualizarIndicador('guardando',(i+Math.min(BSIZ,clientes.length-i))+'/'+clientes.length);
     }
-    await Promise.all(saveP);
-    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'],ts:serverTimestamp()});
-    try{
-      localStorage.setItem('epsan_v3',JSON.stringify({entidades:window.DB.entidades,carteras:window.DB.carteras,comercios:window.DB.comercios,estados:window.DB.estados,clientes:window.DB.clientes}));
-    }catch(e){}
+    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
+    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
-  } catch(e){
-    console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message);
-    window._fbSaving=false; actualizarIndicador('error'); return false;
-  }
+  } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
 };
 
 // -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
-  // Cargar desde localStorage primero (instantaneo)
-  try{
-    const local=localStorage.getItem('epsan_v3');
-    if(local){
+
+  // 1. Intentar cargar desde localStorage primero (carga instantánea)
+  const local=localStorage.getItem('epsan_v3');
+  if(local){
+    try{
       const d=JSON.parse(local);
-      if(d.entidades) window.DB.entidades=d.entidades;
-      if(d.carteras) window.DB.carteras=d.carteras;
-      if(d.comercios) window.DB.comercios=d.comercios;
-      if(d.estados) window.DB.estados=d.estados;
-      if(d.clientes&&d.clientes.length){ window.DB.clientes=d.clientes; }
-      else { window.DB.clientes=[]; }
+      Object.assign(window.DB,d);
+      if(!window.DB.comercios) window.DB.comercios=[];
       renderLista();
       if(window.clienteActivo) renderFicha(); else renderWelcome();
-    } else {
-      window.DB.clientes=[];
-      renderLista();
-      renderWelcome();
-    }
-  }catch(e){ window.DB.clientes=[]; renderLista(); renderWelcome(); }
+    }catch(e){}
+  }
 
-  // Sincronizar con Firebase en segundo plano
+  // 2. Luego sincronizar con Firebase en segundo plano
   try {
+    // Cargar config (entidades, carteras, comercios) — documento pequeño
     const cfgSnap=await getDoc(CONFIG_REF);
     if(cfgSnap.exists()){
       const cfg=cfgSnap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades||[];
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
-      window.DB.estados=cfg.estados||window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
+      window.DB.estados=cfg.estados||window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
     }
-    actualizarIndicador('guardando');
+
+    // Cargar clientes UNA SOLA VEZ (getDocs, no onSnapshot)
     const cliSnap=await getDocs(CLIENTES_COL);
     window.DB.clientes=[];
-    cliSnap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+    cliSnap.forEach(function(d){
+      try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){}
+    });
     if(!window.DB.comercios) window.DB.comercios=[];
+
     window._fbConnected=true;
     actualizarIndicador('ok');
-    // Guardar en localStorage para proxima carga rapida
-    try{
-      localStorage.setItem('epsan_v3',JSON.stringify({
-        entidades:window.DB.entidades, carteras:window.DB.carteras,
-        comercios:window.DB.comercios, estados:window.DB.estados,
-        clientes:window.DB.clientes
-      }));
-    }catch(e){
-      // Si localStorage esta lleno, guardar sin clientes
-      try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:window.DB.entidades,carteras:window.DB.carteras,comercios:window.DB.comercios,estados:window.DB.estados,clientes:[]})); }catch(e2){}
-    }
+
+    // Guardar en localStorage para próxima carga rápida
+    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+
     renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
+
+    // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
+    // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
     onSnapshot(CONFIG_REF,function(snap){
       if(!snap.exists()) return;
       const cfg=snap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades;
       window.DB.carteras=cfg.carteras||window.DB.carteras;
       window.DB.comercios=cfg.comercios||window.DB.comercios;
-      window.DB.estados=cfg.estados||window.DB.estados;
     });
+
+    // 4. Botón para refrescar clientes manualmente si lo necesitan
+    window.refrescarClientes = async function(){
+      actualizarIndicador('conectando');
+      const snap=await getDocs(CLIENTES_COL);
+      window.DB.clientes=[];
+      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+      try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+      actualizarIndicador('ok');
+      renderLista();
+      if(window.clienteActivo) renderFicha(); else renderWelcome();
+    };
+
   } catch(e){
     console.error('Error Firebase:',e);
     window._fbConnected=false;
     actualizarIndicador('error');
+    // Fallback: usar lo que ya cargamos de localStorage
+    if(!window.DB.comercios) window.DB.comercios=[];
+    renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
 }
 
+// -- AUTH STATE --
+onAuthStateChanged(auth, function(user){
+  if(user){
+    // Usuario logueado — mostrar app y cargar datos
+    const emailEl=document.getElementById('user-email');
+    if(emailEl) emailEl.textContent=user.email;
+    mostrarApp();
+    var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
+  } else {
+    // No logueado — mostrar pantalla de login
+    mostrarLogin();
+  }
+});
+
+
+// -- saveMuchos: guardar multiples clientes en paralelo (4 batches a la vez) --
 window.saveMuchos = async function(clientes, config){
   window._fbSaving = true;
   const BSIZ = 450, CONCURRENCIA = 4;
@@ -646,11 +659,7 @@ function renderLista(){
   });
 
   const el=document.getElementById('clientList');
-  if(!fil.length){
-    var srch=(document.getElementById('srchInput').value||'').trim();
-    el.innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">'+(srch.length>=3?'Sin resultados para esa búsqueda':'Ingresá al menos 3 caracteres para buscar')+'</div>';
-    return;
-  }
+  if(!fil.length){el.innerHTML='<div style="padding:18px;text-align:center;color:#aaa;font-size:12px">Sin resultados</div>';return;}
   el.innerHTML=fil.map(c=>{
     const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
     const sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
@@ -665,24 +674,19 @@ function renderLista(){
   }).join('');
 }
 
-var _buscarTimer=null;
-function buscarLista(){
-  clearTimeout(_buscarTimer);
-  _buscarTimer=setTimeout(function(){ renderLista(); },200);
-}
+function buscarLista(){ renderLista(); }
 
 function irPrimerResultado(){
   const q=(document.getElementById('srchInput').value||'').toLowerCase();
   if(!q) return;
-  const qNorm=q.replace(/[.]/g,'');
-  const encontrado=DB.clientes.find(function(c){
-    const dniNorm=(c.dni||'').replace(/[.]/g,'');
-    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+  const encontrado = DB.clientes.find(c=>{
+    const qNorm=q.replace(/\./g,'');
+    const dniNorm=(c.dni||'').replace(/\./g,'');
+    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(x=>x.num).join('')).toLowerCase();
     return txt.includes(qNorm);
   });
   if(encontrado){ selCliente(encontrado.id); setTabAdmin('datos'); }
 }
-
 
 function selCliente(id){
   clienteActivo = DB.clientes.find(c=>c.id===id);
@@ -704,7 +708,7 @@ const TABS_ADMIN = [
   {id:'datos',label:'Datos cliente'},
   {id:'cuenta',label:'Cuenta corriente'},
   {id:'tramites',label:'Trámites'},
-  
+  {id:'busqueda',label:'Búsqueda'},
   {id:'obs',label:'Observaciones'},
   {id:'dashboard',label:'Dashboard'},
 ];
@@ -888,9 +892,7 @@ function renderCuenta(){
               bg='background:#fffbe8;border-left:3px solid #e8c030;';
             }
             if(p.pagada){
-              bg= esAnticipo ? 'background:#fffbe8;' : ''; estadoTxt='✅ Pagada'+(p.montoPagado?' ($'+Math.round(p.montoPagado).toLocaleString('es-AR')+')':''); btnCls='btn-outline';
-            } else if(p.pagadaParcial){
-              bg='background:#FAEEDA;border-left:3px solid #e09020;'; estadoTxt='⚠️ A cuenta — Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR'); btnCls='btn-red';
+              bg= esAnticipo ? 'background:#fffbe8;' : ''; estadoTxt='✅ Pagada'; btnCls='btn-outline';
             } else if(p.vto < hoy){
               bg='background:#FCEBEB;border-left:3px solid #e05555;'; estadoTxt='🔴 Vencida'; btnCls='btn-red';
             } else if(p.vto <= new Date(new Date().setDate(new Date().getDate()+7)).toISOString().slice(0,10)){
@@ -904,10 +906,7 @@ function renderCuenta(){
               '<div>'+p.vto+'</div>'+
               '<div>$'+parseFloat(p.monto||0).toLocaleString('es-AR')+'</div>'+
               '<div>'+estadoTxt+'</div>'+
-              '<div>'+
-              (p.pagadaParcial?'<div style="font-size:10px;color:#854F0B;margin-bottom:2px">Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR')+'</div>':'')+ 
-              '<button class="btn btn-sm '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
-              '</div>'+
+              '<div><button class="btn btn-sm '+btnCls+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':'Pagar')+'</button></div>'+
             '</div>';
           }).join('');
         })()}
@@ -1450,53 +1449,10 @@ function guardarPlan(){
 }
 
 function toggleCuota(ci,pi){
-  var cuota=clienteActivo.creditos[ci].plan[pi];
-  if(cuota.pagada||cuota.pagadaParcial){
-    if(!confirm('\u00bfDeshacer el pago de esta cuota?')) return;
-    var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
-    var p=DB.clientes[idx].creditos[ci].plan[pi];
-    p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;
-    clienteActivo=DB.clientes[idx];
-    saveDB(clienteActivo);setTabAdmin('cuenta');
-  } else {
-    window._pagoCI=ci;window._pagoPI=pi;
-    var monto=cuota.monto||0;
-    document.getElementById('pago-monto').value=monto;
-    document.getElementById('pago-fecha').value=new Date().toISOString().slice(0,10);
-    document.getElementById('pago-nota').value='';
-    document.getElementById('pago-original').textContent='$'+Math.round(monto).toLocaleString('es-AR');
-    document.getElementById('pago-diferencia').textContent='\u2014';
-    document.getElementById('pago-diferencia').style.color='#555';
-    document.getElementById('modalPago').classList.add('open');
-  }
-}
-function calcDiferenciaPago(){
-  var cuota=clienteActivo.creditos[window._pagoCI].plan[window._pagoPI];
-  var monto=parseFloat(document.getElementById('pago-monto').value)||0;
-  var original=cuota.monto||0;
-  var dif=monto-original;
-  var el=document.getElementById('pago-diferencia');
-  if(Math.abs(dif)<1){ el.textContent='Pago exacto'; el.style.color='#27500A'; }
-  else if(dif<0){ el.textContent='A cuenta \u2014 saldo: $'+Math.round(Math.abs(dif)).toLocaleString('es-AR'); el.style.color='#854F0B'; }
-  else { el.textContent='Con recargo: +$'+Math.round(dif).toLocaleString('es-AR'); el.style.color='#1a4a8a'; }
-}
-function confirmarPago(){
-  var monto=parseFloat(document.getElementById('pago-monto').value)||0;
-  var fecha=document.getElementById('pago-fecha').value;
-  var nota=document.getElementById('pago-nota').value.trim();
-  if(!monto){alert('Ingres\u00e1 el monto');return;}
-  var ci=window._pagoCI;var pi=window._pagoPI;
-  var cuota=clienteActivo.creditos[ci].plan[pi];
-  var original=cuota.monto||0;
-  var dif=monto-original;
-  var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
-  var p=DB.clientes[idx].creditos[ci].plan[pi];
-  p.montoPagado=monto;p.fechaPago=fecha;p.notaPago=nota;
-  if(Math.abs(dif)<1){ p.pagada=true;p.pagadaParcial=false;p.saldo=0; }
-  else if(dif<0){ p.pagada=false;p.pagadaParcial=true;p.saldo=Math.abs(dif); }
-  else { p.pagada=true;p.pagadaParcial=false;p.saldo=0;p.recargo=dif; }
+  const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
+  DB.clientes[idx].creditos[ci].plan[pi].pagada=!DB.clientes[idx].creditos[ci].plan[pi].pagada;
   clienteActivo=DB.clientes[idx];
-  saveDB(clienteActivo);cerrarModal('modalPago');setTabAdmin('cuenta');
+  saveDB(clienteActivo);setTabAdmin('cuenta');
 }
 
 // -- TRÁMITES --
@@ -1688,42 +1644,26 @@ function renderComerciosConsulta(){
   var el=document.getElementById('consultaContent');
   var comercios=DB.comercios||[];
   el.innerHTML='<div class="card">'+
-    '<div class="card-hdr"><div class="card-title">Comercios ('+comercios.length+')</div>'+
+    '<div class="card-hdr"><div class="card-title">Comercios</div>'+
     '<button class="btn btn-dark btn-sm" onclick="abrirModalComercioConsulta(-1)">+ Nuevo</button></div>'+
-    '<div style="margin-bottom:12px">'+
-    '<input id="com-search" placeholder="Buscar por nombre de comercio..." oninput="filtrarComerciosConsulta()" '+
-    'style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">'+
-    '</div>'+
-    '<div id="com-tabla"></div>'+
+    (comercios.length?
+      '<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel&eacute;fono</th><th>Mail</th><th>Observaciones</th><th></th></tr></thead><tbody>'+
+      comercios.map(function(c,i){
+        return '<tr>'+
+          '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
+          '<td>'+(c.producto||'&mdash;')+'</td>'+
+          '<td>'+(c.localidad||'&mdash;')+'</td>'+
+          '<td>'+(c.telefono||'&mdash;')+'</td>'+
+          '<td>'+(c.mail||'&mdash;')+'</td>'+
+          '<td style="max-width:200px;font-size:11px">'+(c.datos||'&mdash;')+'</td>'+
+          '<td><button class="btn btn-outline btn-sm" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
+        '</tr>';
+      }).join('')+'</tbody></table>'
+    :'<div style="color:#aaa;font-size:13px;padding:10px">Sin comercios cargados</div>')+
   '</div>';
-  filtrarComerciosConsulta();
 }
 
-function filtrarComerciosConsulta(){
-  var q=(document.getElementById('com-search').value||'').toLowerCase().trim();
-  var comercios=DB.comercios||[];
-  var fil=q?comercios.filter(function(c){ return (c.nombre||'').toLowerCase().includes(q)||(c.localidad||'').toLowerCase().includes(q)||(c.producto||'').toLowerCase().includes(q); }):comercios;
-  var el=document.getElementById('com-tabla');
-  if(!el) return;
-  if(!fil.length){
-    el.innerHTML='<div style="color:#aaa;font-size:13px;padding:10px">'+( q?'Sin resultados para "'+q+'"':'Sin comercios cargados')+'</div>';
-    return;
-  }
-  el.innerHTML='<table class="tbl"><thead><tr><th>Nombre</th><th>Producto</th><th>Localidad</th><th>Tel&eacute;fono</th><th>Mail</th><th>Observaciones</th><th></th></tr></thead><tbody>'+
-    fil.map(function(c){
-      var i=comercios.indexOf(c);
-      return '<tr>'+
-        '<td><strong>'+(c.nombre||'&mdash;')+'</strong></td>'+
-        '<td>'+(c.producto||'&mdash;')+'</td>'+
-        '<td>'+(c.localidad||'&mdash;')+'</td>'+
-        '<td>'+(c.telefono||'&mdash;')+'</td>'+
-        '<td>'+(c.mail||'&mdash;')+'</td>'+
-        '<td style="max-width:200px;font-size:11px">'+(c.datos||'&mdash;')+'</td>'+
-        '<td><button class="btn btn-outline btn-sm" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
-      '</tr>';
-    }).join('')+'</tbody></table>';
-}
-
+var _idxComercio=null;
 function abrirModalComercioConsulta(i){
   _idxComercio=i;
   var c=i>=0?(DB.comercios||[])[i]:{};
@@ -2587,30 +2527,5 @@ function ejecutarRenombradoCarteras(){
 // Cerrar modales
 document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
 </script>
-
-<div class="modal-overlay" id="modalPago">
-<div class="modal">
-  <h3>Registrar Pago</h3>
-  <div style="background:#f4f8fd;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px">
-    <div>Cuota original: <strong id="pago-original">—</strong></div>
-    <div style="margin-top:5px">Diferencia: <strong id="pago-diferencia">—</strong></div>
-  </div>
-  <div style="display:grid;gap:10px;margin-bottom:14px">
-    <div class="fld"><label>Monto cobrado ($)</label>
-      <input type="number" id="pago-monto" oninput="calcDiferenciaPago()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none">
-    </div>
-    <div class="fld"><label>Fecha de pago</label>
-      <input type="date" id="pago-fecha" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">
-    </div>
-    <div class="fld"><label>Nota / Detalle</label>
-      <textarea id="pago-nota" placeholder="Ej: Pago parcial, acuerdo telefónico..." style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:12px;outline:none;resize:vertical;min-height:60px;font-family:Arial"></textarea>
-    </div>
-  </div>
-  <div class="btn-row">
-    <button class="btn btn-dark" onclick="confirmarPago()">Confirmar pago</button>
-    <button class="btn btn-outline" onclick="cerrarModal('modalPago')">Cancelar</button>
-  </div>
-</div>
-</div>
 </body>
 </html>
