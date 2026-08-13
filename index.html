@@ -128,104 +128,114 @@ window.importarMasivo=async function(clientes,reemplazar){
     if(reemplazar){
       const snap=await getDocs(CLIENTES_COL);
       const BSIZ=450; const docs=snap.docs;
-      const delP=[];
-      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); delP.push(b.commit()); }
-      await Promise.all(delP);
+      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); await b.commit(); }
       window.DB.clientes=clientes;
     } else {
       window.DB.clientes=[...window.DB.clientes,...clientes];
     }
-    const BSIZ=450; const saveP=[];
+    const BSIZ=450;
     for(let i=0;i<clientes.length;i+=BSIZ){
       const b=writeBatch(db_fs);
-      clientes.slice(i,i+BSIZ).forEach(c=>{
-        if(!c.id) c.id='c_'+Date.now()+'_'+Math.random().toString(36).slice(2);
-        b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()});
-      });
-      saveP.push(b.commit());
-      actualizarIndicador('guardando',Math.min(i+BSIZ,clientes.length)+'/'+clientes.length);
+      clientes.slice(i,i+BSIZ).forEach(c=>{ if(!c.id) c.id='c_'+Date.now()+'_'+Math.random().toString(36).slice(2); b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()}); });
+      await b.commit();
+      actualizarIndicador('guardando',(i+Math.min(BSIZ,clientes.length-i))+'/'+clientes.length);
     }
-    await Promise.all(saveP);
-    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'],ts:serverTimestamp()});
-    try{
-      localStorage.setItem('epsan_v3',JSON.stringify({entidades:window.DB.entidades,carteras:window.DB.carteras,comercios:window.DB.comercios,estados:window.DB.estados,clientes:window.DB.clientes}));
-    }catch(e){}
+    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
+    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
-  } catch(e){
-    console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message);
-    window._fbSaving=false; actualizarIndicador('error'); return false;
-  }
+  } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
 };
 
 // -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
-  // 1. Carga instantanea desde localStorage
-  try{
-    const local=localStorage.getItem('epsan_v3');
-    if(local){
+
+  // 1. Intentar cargar desde localStorage primero (carga instantánea)
+  const local=localStorage.getItem('epsan_v3');
+  if(local){
+    try{
       const d=JSON.parse(local);
-      if(d.entidades) window.DB.entidades=d.entidades;
-      if(d.carteras) window.DB.carteras=d.carteras;
-      if(d.comercios) window.DB.comercios=d.comercios;
-      if(d.estados) window.DB.estados=d.estados;
-      if(d.clientes&&d.clientes.length){ window.DB.clientes=d.clientes; }
-      else { window.DB.clientes=[]; }
+      Object.assign(window.DB,d);
+      if(!window.DB.comercios) window.DB.comercios=[];
       renderLista();
       if(window.clienteActivo) renderFicha(); else renderWelcome();
-    } else {
-      window.DB.clientes=[];
-      renderLista();
-      renderWelcome();
-    }
-  }catch(e){ window.DB.clientes=[]; renderLista(); renderWelcome(); }
+    }catch(e){}
+  }
 
-  // 2. Sincronizar con Firebase en segundo plano
+  // 2. Luego sincronizar con Firebase en segundo plano
   try {
+    // Cargar config (entidades, carteras, comercios) — documento pequeño
     const cfgSnap=await getDoc(CONFIG_REF);
     if(cfgSnap.exists()){
       const cfg=cfgSnap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades||[];
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
-      window.DB.estados=cfg.estados||window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
+      window.DB.estados=cfg.estados||window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
     }
-    // Cargar todos los clientes y cachear
-    const cliSnap=await getDocs(CLIENTES_COL);
+
     window.DB.clientes=[];
-    cliSnap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
     if(!window.DB.comercios) window.DB.comercios=[];
+
     window._fbConnected=true;
     actualizarIndicador('ok');
-    // Guardar en localStorage para proxima carga rapida
-    try{
-      localStorage.setItem('epsan_v3',JSON.stringify({
-        entidades:window.DB.entidades,carteras:window.DB.carteras,
-        comercios:window.DB.comercios,estados:window.DB.estados,
-        clientes:window.DB.clientes
-      }));
-    }catch(e){
-      // Si localStorage esta lleno, guardar sin clientes
-      try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:window.DB.entidades,carteras:window.DB.carteras,comercios:window.DB.comercios,estados:window.DB.estados,clientes:[]})); }catch(e2){}
-    }
+
+    // Guardar en localStorage para próxima carga rápida
+    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+
     renderLista();
     if(window.clienteActivo) renderFicha(); else renderWelcome();
+
+    // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
+    // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
     onSnapshot(CONFIG_REF,function(snap){
       if(!snap.exists()) return;
       const cfg=snap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades;
       window.DB.carteras=cfg.carteras||window.DB.carteras;
       window.DB.comercios=cfg.comercios||window.DB.comercios;
-      window.DB.estados=cfg.estados||window.DB.estados;
     });
+
+    // 4. Botón para refrescar clientes manualmente si lo necesitan
+    window.refrescarClientes = async function(){
+      actualizarIndicador('conectando');
+      const snap=await getDocs(CLIENTES_COL);
+      window.DB.clientes=[];
+      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+      try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+      actualizarIndicador('ok');
+      renderLista();
+      if(window.clienteActivo) renderFicha(); else renderWelcome();
+    };
+
   } catch(e){
     console.error('Error Firebase:',e);
     window._fbConnected=false;
     actualizarIndicador('error');
+    // Fallback: usar lo que ya cargamos de localStorage
+    if(!window.DB.comercios) window.DB.comercios=[];
+    renderLista();
+    if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
 }
 
+// -- AUTH STATE --
+onAuthStateChanged(auth, function(user){
+  if(user){
+    // Usuario logueado — mostrar app y cargar datos
+    const emailEl=document.getElementById('user-email');
+    if(emailEl) emailEl.textContent=user.email;
+    mostrarApp();
+    var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
+  } else {
+    // No logueado — mostrar pantalla de login
+    mostrarLogin();
+  }
+});
+
+
+// -- saveMuchos: guardar multiples clientes en paralelo (4 batches a la vez) --
 window.saveMuchos = async function(clientes, config){
   window._fbSaving = true;
   const BSIZ = 450, CONCURRENCIA = 4;
@@ -664,24 +674,50 @@ function renderLista(){
 }
 
 var _buscarTimer=null;
-var _buscarTimer=null;
 function buscarLista(){
   clearTimeout(_buscarTimer);
-  _buscarTimer=setTimeout(function(){ renderLista(); },200);
+  _buscarTimer=setTimeout(function(){
+    var q=(document.getElementById('srchInput').value||'').trim();
+    if(q.length>=3){
+      buscarEnFirebase(q);
+    } else if(q.length===0){
+      window.DB.clientes=[];
+      renderLista();
+    }
+  },500);
 }
-
+async function buscarEnFirebase(q){
+  actualizarIndicador('guardando');
+  try {
+    var snap=await getDocs(CLIENTES_COL);
+    var qNorm=q.toLowerCase().replace(/\./g,'');
+    window.DB.clientes=[];
+    snap.forEach(function(d){
+      try{
+        var c=JSON.parse(d.data().data);
+        var dniNorm=(c.dni||'').replace(/\./g,'');
+        var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+        if(txt.includes(qNorm)) window.DB.clientes.push(c);
+      }catch(e){}
+    });
+    actualizarIndicador('ok');
+    renderLista();
+  } catch(e){
+    console.error('Error buscando:',e);
+    actualizarIndicador('error');
+  }
+}
 function irPrimerResultado(){
-  const q=(document.getElementById('srchInput').value||'').toLowerCase();
+  var q=(document.getElementById('srchInput').value||'').toLowerCase();
   if(!q) return;
-  const qNorm=q.replace(/[.]/g,'');
-  const encontrado=DB.clientes.find(function(c){
-    const dniNorm=(c.dni||'').replace(/[.]/g,'');
-    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+  var encontrado=DB.clientes.find(function(c){
+    var qNorm=q.replace(/\./g,'');
+    var dniNorm=(c.dni||'').replace(/\./g,'');
+    var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
     return txt.includes(qNorm);
   });
   if(encontrado){ selCliente(encontrado.id); setTabAdmin('datos'); }
 }
-
 
 function selCliente(id){
   clienteActivo = DB.clientes.find(c=>c.id===id);
