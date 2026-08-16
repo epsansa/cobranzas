@@ -150,92 +150,56 @@ window.importarMasivo=async function(clientes,reemplazar){
 // -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
-
-  // 1. Intentar cargar desde localStorage primero (carga instantánea)
-  const local=localStorage.getItem('epsan_v3');
-  if(local){
-    try{
+  // Solo cargar config desde localStorage (instantaneo, SIN clientes)
+  try{
+    const local=localStorage.getItem('epsan_v3');
+    if(local){
       const d=JSON.parse(local);
-      Object.assign(window.DB,d);
-      if(!window.DB.comercios) window.DB.comercios=[];
-      renderLista();
-      if(window.clienteActivo) renderFicha(); else renderWelcome();
-    }catch(e){}
-  }
+      if(d.entidades) window.DB.entidades=d.entidades;
+      if(d.carteras) window.DB.carteras=d.carteras;
+      if(d.comercios) window.DB.comercios=d.comercios;
+      if(d.estados) window.DB.estados=d.estados;
+    }
+  }catch(e){}
+  window.DB.clientes=[];
+  renderLista();
+  renderWelcome();
 
-  // 2. Luego sincronizar con Firebase en segundo plano
+  // Cargar config desde Firebase
   try {
-    // Cargar config (entidades, carteras, comercios) — documento pequeño
     const cfgSnap=await getDoc(CONFIG_REF);
     if(cfgSnap.exists()){
       const cfg=cfgSnap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades||[];
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
-      window.DB.estados=cfg.estados||window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
+      window.DB.estados=cfg.estados||window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
+      // Guardar config en localStorage
+      try{
+        const ldata=JSON.parse(localStorage.getItem('epsan_v3')||'{}');
+        ldata.entidades=window.DB.entidades; ldata.carteras=window.DB.carteras;
+        ldata.comercios=window.DB.comercios; ldata.estados=window.DB.estados;
+        localStorage.setItem('epsan_v3',JSON.stringify(ldata));
+      }catch(e){}
     }
-
-    window.DB.clientes=[];
-    if(!window.DB.comercios) window.DB.comercios=[];
-
     window._fbConnected=true;
     actualizarIndicador('ok');
-
-    // Guardar en localStorage para próxima carga rápida
-    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
-
     renderLista();
-    if(window.clienteActivo) renderFicha(); else renderWelcome();
-
-    // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
-    // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
     onSnapshot(CONFIG_REF,function(snap){
       if(!snap.exists()) return;
       const cfg=snap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades;
       window.DB.carteras=cfg.carteras||window.DB.carteras;
       window.DB.comercios=cfg.comercios||window.DB.comercios;
+      window.DB.estados=cfg.estados||window.DB.estados;
     });
-
-    // 4. Botón para refrescar clientes manualmente si lo necesitan
-    window.refrescarClientes = async function(){
-      actualizarIndicador('conectando');
-      const snap=await getDocs(CLIENTES_COL);
-      window.DB.clientes=[];
-      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
-      try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
-      actualizarIndicador('ok');
-      renderLista();
-      if(window.clienteActivo) renderFicha(); else renderWelcome();
-    };
-
   } catch(e){
     console.error('Error Firebase:',e);
     window._fbConnected=false;
     actualizarIndicador('error');
-    // Fallback: usar lo que ya cargamos de localStorage
-    if(!window.DB.comercios) window.DB.comercios=[];
-    renderLista();
-    if(window.clienteActivo) renderFicha(); else renderWelcome();
   }
 }
 
-// -- AUTH STATE --
-onAuthStateChanged(auth, function(user){
-  if(user){
-    // Usuario logueado — mostrar app y cargar datos
-    const emailEl=document.getElementById('user-email');
-    if(emailEl) emailEl.textContent=user.email;
-    mostrarApp();
-    var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
-  } else {
-    // No logueado — mostrar pantalla de login
-    mostrarLogin();
-  }
-});
-
-
-// -- saveMuchos: guardar multiples clientes en paralelo (4 batches a la vez) --
 window.saveMuchos = async function(clientes, config){
   window._fbSaving = true;
   const BSIZ = 450, CONCURRENCIA = 4;
@@ -676,48 +640,55 @@ function renderLista(){
 var _buscarTimer=null;
 function buscarLista(){
   clearTimeout(_buscarTimer);
-  _buscarTimer=setTimeout(function(){
-    var q=(document.getElementById('srchInput').value||'').trim();
-    if(q.length>=3){
-      buscarEnFirebase(q);
-    } else if(q.length===0){
-      window.DB.clientes=[];
-      renderLista();
-    }
-  },500);
+  const q=(document.getElementById('srchInput').value||'').trim();
+  if(q.length===0){
+    window.DB.clientes=[];
+    renderLista();
+    return;
+  }
+  if(q.length<3){
+    document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Ingresá al menos 3 caracteres...</div>';
+    return;
+  }
+  _buscarTimer=setTimeout(function(){ buscarClientesFirebase(q); },400);
 }
-async function buscarEnFirebase(q){
-  actualizarIndicador('guardando');
+
+async function buscarClientesFirebase(q){
+  if(!window._fbConnected){ 
+    document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Sin conexión a la nube</div>';
+    return;
+  }
+  document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#888;font-size:12px">&#128269; Buscando...</div>';
   try {
-    var snap=await getDocs(CLIENTES_COL);
-    var qNorm=q.toLowerCase().replace(/\./g,'');
+    const snap=await getDocs(CLIENTES_COL);
+    const qNorm=q.toLowerCase().replace(/[.]/g,'');
     window.DB.clientes=[];
     snap.forEach(function(d){
       try{
-        var c=JSON.parse(d.data().data);
-        var dniNorm=(c.dni||'').replace(/\./g,'');
-        var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+        const c=JSON.parse(d.data().data);
+        const dniNorm=(c.dni||'').replace(/[.]/g,'');
+        const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
         if(txt.includes(qNorm)) window.DB.clientes.push(c);
       }catch(e){}
     });
-    actualizarIndicador('ok');
     renderLista();
   } catch(e){
-    console.error('Error buscando:',e);
-    actualizarIndicador('error');
+    document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Error al buscar</div>';
   }
 }
+
 function irPrimerResultado(){
-  var q=(document.getElementById('srchInput').value||'').toLowerCase();
-  if(!q) return;
-  var encontrado=DB.clientes.find(function(c){
-    var qNorm=q.replace(/\./g,'');
-    var dniNorm=(c.dni||'').replace(/\./g,'');
-    var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
+  const q=(document.getElementById('srchInput').value||'').toLowerCase();
+  if(!q||q.length<3) return;
+  const qNorm=q.replace(/[.]/g,'');
+  const encontrado=DB.clientes.find(function(c){
+    const dniNorm=(c.dni||'').replace(/[.]/g,'');
+    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
     return txt.includes(qNorm);
   });
   if(encontrado){ selCliente(encontrado.id); setTabAdmin('datos'); }
 }
+
 
 function selCliente(id){
   clienteActivo = DB.clientes.find(c=>c.id===id);
@@ -2577,59 +2548,76 @@ function renderLimpiarDuplicados(){
 async function ejecutarLimpiezaDuplicados(){
   if(!confirm('Eliminar duplicados y fusionar créditos. ¿Confirmás?')) return;
   const el=document.getElementById('herrContent');
-  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:16px">&#128190; Procesando...</div></div>';
-  
+
   // Agrupar por DNI
   const dniMap={};
   DB.clientes.forEach(function(c){
     const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni){ return; }
+    if(!dni) return;
     if(!dniMap[dni]) dniMap[dni]=[];
     dniMap[dni].push(c);
   });
 
-  const aEliminar=[];
+  const aEliminarIds=[];
   const aModificar=[];
 
   Object.values(dniMap).forEach(function(arr){
     if(arr.length<=1) return;
-    // Ordenar: el que tiene mas datos primero
-    arr.sort(function(a,b){ return (JSON.stringify(b).length)-(JSON.stringify(a).length); });
+    arr.sort(function(a,b){ return JSON.stringify(b).length - JSON.stringify(a).length; });
     const principal=arr[0];
-    // Fusionar creditos unicos de los duplicados
     arr.slice(1).forEach(function(dup){
       (dup.creditos||[]).forEach(function(cr){
-        const yaExiste=(principal.creditos||[]).some(function(e){
-          return e.num&&cr.num&&e.num===cr.num;
-        });
+        const yaExiste=(principal.creditos||[]).some(function(e){ return e.num&&cr.num&&e.num===cr.num; });
         if(!yaExiste){ if(!principal.creditos) principal.creditos=[]; principal.creditos.push(cr); }
       });
-      // Fusionar telefonos
       (dup.telefonos||[]).forEach(function(t){ if(t&&!(principal.telefonos||[]).includes(t)){ if(!principal.telefonos) principal.telefonos=[]; principal.telefonos.push(t); } });
-      // Marcar para eliminar
-      aEliminar.push(dup.id);
+      aEliminarIds.push(dup.id);
     });
     aModificar.push(principal);
   });
 
-  // Eliminar duplicados de DB local
-  DB.clientes=DB.clientes.filter(function(c){ return !aEliminar.includes(c.id); });
-  
-  // Guardar modificados en Firebase
-  for(var i=0;i<aModificar.length;i++){
+  if(!aEliminarIds.length){
+    el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A">&#10003; No hay duplicados.</div></div>';
+    return;
+  }
+
+  // Eliminar de DB local
+  DB.clientes=DB.clientes.filter(function(c){ return !aEliminarIds.includes(c.id); });
+
+  const LOTE=500;
+  let procesados=0;
+  const total=aEliminarIds.length+aModificar.length;
+
+  function actualizarProg(){
+    procesados++;
+    el.innerHTML='<div class="card"><div style="color:#2557a7;padding:16px">&#128190; Procesando '+procesados+' de '+total+'...</div>'+
+      '<div style="background:#dce8f5;border-radius:6px;height:8px;margin:10px 16px"><div style="background:#2557a7;border-radius:6px;height:8px;width:'+Math.round(procesados/total*100)+'%"></div></div></div>';
+  }
+
+  // Guardar modificados en Firebase (con creditos fusionados)
+  for(let i=0;i<aModificar.length;i++){
     await window.saveDB(aModificar[i]);
+    actualizarProg();
+    if(i%10===9) await new Promise(r=>setTimeout(r,50)); // respiro cada 10
   }
-  // Eliminar duplicados en Firebase
-  if(typeof window.deleteClienteDB === 'function'){
-    for(var i=0;i<aEliminar.length;i++){
-      await window.deleteClienteDB(aEliminar[i]);
+
+  // Eliminar duplicados en Firebase por lotes
+  for(let i=0;i<aEliminarIds.length;i+=LOTE){
+    const lote=aEliminarIds.slice(i,i+LOTE);
+    for(let j=0;j<lote.length;j++){
+      if(typeof window.deleteClienteDB==='function') await window.deleteClienteDB(lote[j]);
+      actualizarProg();
     }
+    await new Promise(r=>setTimeout(r,200)); // pausa entre lotes
   }
+
+  // Actualizar localStorage
+  try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados,clientes:DB.clientes})); }catch(e){}
 
   renderLista();
   el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">'+
     '<strong>&#10003; Limpieza completada</strong><br>'+
-    aEliminar.length+' registros duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
+    aEliminarIds.length+' duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
     '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
 }
 
