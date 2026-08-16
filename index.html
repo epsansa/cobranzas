@@ -1852,6 +1852,7 @@ function renderHerramientas(){
     <div class="tb" onclick="setTabHerr('exportar',this)">Exportar clientes</div>
     <div class="tb" onclick="setTabHerr('backup',this)">Backup</div>
     <div class="tb" onclick="setTabHerr('mantenimiento',this)">&#9881; Mantenimiento</div>
+    <div class="tb" onclick="setTabHerr('duplicados',this)">&#128465; Limpiar duplicados</div>
     <div class="tb" onclick="setTabHerr('importtel',this)">&#128222; Importar Tel/Tr&#225;mites</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
@@ -1866,6 +1867,7 @@ function setTabHerr(tab,el){
   else if(tab==='exportar') renderExportar();
   else if(tab==='backup') renderBackupTab();
   else if(tab==='importtel') renderImportarTelTramites();
+  else if(tab==='duplicados') renderLimpiarDuplicados();
   else renderMantenimiento();
 }
 
@@ -2008,8 +2010,39 @@ window.confirmarImport = async function(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
   extraerDatosImport(n);
-  const ok=await window.importarMasivo(n,false);
-  if(ok){ renderLista(); document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; '+n.length+' clientes importados</strong></div>'; }
+  // Deduplicar contra clientes existentes por DNI
+  const nuevos=[];
+  const modificados=[];
+  n.forEach(function(nuevo){
+    const dniNorm=(nuevo.dni||'').replace(/[.]/g,'').trim();
+    if(!dniNorm){ nuevos.push(nuevo); return; }
+    const existente=DB.clientes.find(function(c){ return (c.dni||'').replace(/[.]/g,'').trim()===dniNorm; });
+    if(!existente){
+      nuevos.push(nuevo);
+    } else {
+      // Fusionar creditos nuevos que no existan
+      var credsMod=false;
+      (nuevo.creditos||[]).forEach(function(cr){
+        const yaExiste=(existente.creditos||[]).some(function(e){
+          return e.num&&cr.num&&e.num===cr.num;
+        });
+        if(!yaExiste){ if(!existente.creditos) existente.creditos=[]; existente.creditos.push(cr); credsMod=true; }
+      });
+      if(credsMod) modificados.push(existente);
+    }
+  });
+  // Guardar nuevos + modificados
+  const todosAGuardar=[...nuevos];
+  DB.clientes=[...DB.clientes,...nuevos];
+  const ok=await window.importarMasivo(nuevos,false);
+  // Guardar modificados por separado
+  if(modificados.length && ok){
+    for(var i=0;i<modificados.length;i++){ await window.saveDB(modificados[i]); }
+  }
+  if(ok){ 
+    renderLista(); 
+    document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; '+nuevos.length+' clientes nuevos importados'+(modificados.length?' · '+modificados.length+' clientes actualizados':'')+'</strong></div>'; 
+  }
   window._importTemp=null;
 };
 window.confirmarReemplazar = async function(){
@@ -2506,6 +2539,100 @@ function aplicarImportTelTramites(){
 // ═══════════════════════════════════════════════════
 // MANTENIMIENTO — Renombrado masivo de carteras
 // ═══════════════════════════════════════════════════
+function renderLimpiarDuplicados(){
+  const el=document.getElementById('herrContent');
+  // Buscar duplicados por DNI
+  const dniCount={};
+  DB.clientes.forEach(function(c){
+    const dni=(c.dni||'').replace(/[.]/g,'').trim();
+    if(!dni) return;
+    if(!dniCount[dni]) dniCount[dni]=[];
+    dniCount[dni].push(c);
+  });
+  const duplicados=Object.values(dniCount).filter(function(arr){ return arr.length>1; });
+  const total=duplicados.reduce(function(s,arr){ return s+(arr.length-1); },0);
+  
+  if(!duplicados.length){
+    el.innerHTML='<div class="card"><div class="card-title" style="margin-bottom:12px">Limpiar duplicados</div>'+
+      '<div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">&#10003; No se encontraron clientes duplicados en la base.</div></div>';
+    return;
+  }
+
+  el.innerHTML='<div class="card">'+
+    '<div class="card-hdr"><div class="card-title">Limpiar duplicados</div>'+
+    '<button class="btn btn-dark btn-sm" onclick="ejecutarLimpiezaDuplicados()">&#128465; Eliminar '+total+' duplicados</button></div>'+
+    '<div style="background:#FAEEDA;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:#633806">'+
+    '<strong>&#9888; Se encontraron '+duplicados.length+' DNI con registros duplicados ('+total+' extras a eliminar).</strong><br>'+
+    'Se conservar&aacute; el registro con m&aacute;s datos y se fusionar&aacute;n los cr&eacute;ditos &uacute;nicos.'+
+    '</div>'+
+    '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>DNI</th><th>Nombre</th><th>Copias</th><th>Entidades</th></tr></thead><tbody>'+
+    duplicados.slice(0,50).map(function(arr){
+      const ents=[...new Set(arr.flatMap(function(c){ return (c.creditos||[]).map(function(cr){ return cr.entidad||c.entidad||''; }); }).filter(Boolean))].join(', ');
+      return '<tr><td>'+arr[0].dni+'</td><td>'+arr[0].nombre+'</td><td>'+arr.length+'</td><td>'+ents+'</td></tr>';
+    }).join('')+
+    (duplicados.length>50?'<tr><td colspan="4" style="color:#888;text-align:center">... y '+(duplicados.length-50)+' m&aacute;s</td></tr>':'')+
+    '</tbody></table></div></div>';
+}
+
+async function ejecutarLimpiezaDuplicados(){
+  if(!confirm('Eliminar duplicados y fusionar créditos. ¿Confirmás?')) return;
+  const el=document.getElementById('herrContent');
+  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:16px">&#128190; Procesando...</div></div>';
+  
+  // Agrupar por DNI
+  const dniMap={};
+  DB.clientes.forEach(function(c){
+    const dni=(c.dni||'').replace(/[.]/g,'').trim();
+    if(!dni){ return; }
+    if(!dniMap[dni]) dniMap[dni]=[];
+    dniMap[dni].push(c);
+  });
+
+  const aEliminar=[];
+  const aModificar=[];
+
+  Object.values(dniMap).forEach(function(arr){
+    if(arr.length<=1) return;
+    // Ordenar: el que tiene mas datos primero
+    arr.sort(function(a,b){ return (JSON.stringify(b).length)-(JSON.stringify(a).length); });
+    const principal=arr[0];
+    // Fusionar creditos unicos de los duplicados
+    arr.slice(1).forEach(function(dup){
+      (dup.creditos||[]).forEach(function(cr){
+        const yaExiste=(principal.creditos||[]).some(function(e){
+          return e.num&&cr.num&&e.num===cr.num;
+        });
+        if(!yaExiste){ if(!principal.creditos) principal.creditos=[]; principal.creditos.push(cr); }
+      });
+      // Fusionar telefonos
+      (dup.telefonos||[]).forEach(function(t){ if(t&&!(principal.telefonos||[]).includes(t)){ if(!principal.telefonos) principal.telefonos=[]; principal.telefonos.push(t); } });
+      // Marcar para eliminar
+      aEliminar.push(dup.id);
+    });
+    aModificar.push(principal);
+  });
+
+  // Eliminar duplicados de DB local
+  DB.clientes=DB.clientes.filter(function(c){ return !aEliminar.includes(c.id); });
+  
+  // Guardar modificados en Firebase
+  for(var i=0;i<aModificar.length;i++){
+    await window.saveDB(aModificar[i]);
+  }
+  // Eliminar duplicados en Firebase
+  if(typeof window.deleteClienteDB === 'function'){
+    for(var i=0;i<aEliminar.length;i++){
+      await window.deleteClienteDB(aEliminar[i]);
+    }
+  }
+
+  renderLista();
+  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">'+
+    '<strong>&#10003; Limpieza completada</strong><br>'+
+    aEliminar.length+' registros duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
+    '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
+}
+
 function renderMantenimiento(){
   const el=document.getElementById('herrContent');
   const reglas=[
