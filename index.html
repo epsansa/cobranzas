@@ -128,29 +128,40 @@ window.importarMasivo=async function(clientes,reemplazar){
     if(reemplazar){
       const snap=await getDocs(CLIENTES_COL);
       const BSIZ=450; const docs=snap.docs;
-      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); await b.commit(); }
+      const delP=[];
+      for(let i=0;i<docs.length;i+=BSIZ){ const b=writeBatch(db_fs); docs.slice(i,i+BSIZ).forEach(d=>b.delete(d.ref)); delP.push(b.commit()); }
+      await Promise.all(delP);
       window.DB.clientes=clientes;
     } else {
       window.DB.clientes=[...window.DB.clientes,...clientes];
     }
-    const BSIZ=450;
+    const BSIZ=450; const saveP=[];
     for(let i=0;i<clientes.length;i+=BSIZ){
       const b=writeBatch(db_fs);
-      clientes.slice(i,i+BSIZ).forEach(c=>{ if(!c.id) c.id='c_'+Date.now()+'_'+Math.random().toString(36).slice(2); b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()}); });
-      await b.commit();
-      actualizarIndicador('guardando',(i+Math.min(BSIZ,clientes.length-i))+'/'+clientes.length);
+      clientes.slice(i,i+BSIZ).forEach(c=>{
+        if(!c.id) c.id='c_'+Date.now()+'_'+Math.random().toString(36).slice(2);
+        b.set(doc(db_fs,'clientes',c.id),{data:JSON.stringify(c),ts:serverTimestamp()});
+      });
+      saveP.push(b.commit());
+      actualizarIndicador('guardando',Math.min(i+BSIZ,clientes.length)+'/'+clientes.length);
     }
-    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
-    try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+    await Promise.all(saveP);
+    await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'],ts:serverTimestamp()});
+    try{
+      localStorage.setItem('epsan_v3',JSON.stringify({entidades:window.DB.entidades,carteras:window.DB.carteras,comercios:window.DB.comercios,estados:window.DB.estados,clientes:window.DB.clientes}));
+    }catch(e){}
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
-  } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
+  } catch(e){
+    console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message);
+    window._fbSaving=false; actualizarIndicador('error'); return false;
+  }
 };
 
 // -- CARGAR FIREBASE (optimizado — carga una vez, sin listener masivo) --
 async function cargarDatos(){
   actualizarIndicador('conectando');
-  // Solo cargar config desde localStorage (instantaneo, SIN clientes)
+  // 1. Carga instantanea desde localStorage
   try{
     const local=localStorage.getItem('epsan_v3');
     if(local){
@@ -159,13 +170,18 @@ async function cargarDatos(){
       if(d.carteras) window.DB.carteras=d.carteras;
       if(d.comercios) window.DB.comercios=d.comercios;
       if(d.estados) window.DB.estados=d.estados;
+      if(d.clientes&&d.clientes.length){ window.DB.clientes=d.clientes; }
+      else { window.DB.clientes=[]; }
+      renderLista();
+      if(window.clienteActivo) renderFicha(); else renderWelcome();
+    } else {
+      window.DB.clientes=[];
+      renderLista();
+      renderWelcome();
     }
-  }catch(e){}
-  window.DB.clientes=[];
-  renderLista();
-  renderWelcome();
+  }catch(e){ window.DB.clientes=[]; renderLista(); renderWelcome(); }
 
-  // Cargar config desde Firebase
+  // 2. Sincronizar con Firebase en segundo plano
   try {
     const cfgSnap=await getDoc(CONFIG_REF);
     if(cfgSnap.exists()){
@@ -174,17 +190,27 @@ async function cargarDatos(){
       window.DB.carteras=cfg.carteras||window.DB.carteras||[];
       window.DB.comercios=cfg.comercios||window.DB.comercios||[];
       window.DB.estados=cfg.estados||window.DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
-      // Guardar config en localStorage
-      try{
-        const ldata=JSON.parse(localStorage.getItem('epsan_v3')||'{}');
-        ldata.entidades=window.DB.entidades; ldata.carteras=window.DB.carteras;
-        ldata.comercios=window.DB.comercios; ldata.estados=window.DB.estados;
-        localStorage.setItem('epsan_v3',JSON.stringify(ldata));
-      }catch(e){}
     }
+    // Cargar todos los clientes y cachear
+    const cliSnap=await getDocs(CLIENTES_COL);
+    window.DB.clientes=[];
+    cliSnap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+    if(!window.DB.comercios) window.DB.comercios=[];
     window._fbConnected=true;
     actualizarIndicador('ok');
+    // Guardar en localStorage para proxima carga rapida
+    try{
+      localStorage.setItem('epsan_v3',JSON.stringify({
+        entidades:window.DB.entidades,carteras:window.DB.carteras,
+        comercios:window.DB.comercios,estados:window.DB.estados,
+        clientes:window.DB.clientes
+      }));
+    }catch(e){
+      // Si localStorage esta lleno, guardar sin clientes
+      try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:window.DB.entidades,carteras:window.DB.carteras,comercios:window.DB.comercios,estados:window.DB.estados,clientes:[]})); }catch(e2){}
+    }
     renderLista();
+    if(window.clienteActivo) renderFicha(); else renderWelcome();
     onSnapshot(CONFIG_REF,function(snap){
       if(!snap.exists()) return;
       const cfg=snap.data();
@@ -638,48 +664,15 @@ function renderLista(){
 }
 
 var _buscarTimer=null;
+var _buscarTimer=null;
 function buscarLista(){
   clearTimeout(_buscarTimer);
-  const q=(document.getElementById('srchInput').value||'').trim();
-  if(q.length===0){
-    window.DB.clientes=[];
-    renderLista();
-    return;
-  }
-  if(q.length<3){
-    document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Ingresá al menos 3 caracteres...</div>';
-    return;
-  }
-  _buscarTimer=setTimeout(function(){ buscarClientesFirebase(q); },400);
-}
-
-async function buscarClientesFirebase(q){
-  if(!window._fbConnected){ 
-    document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Sin conexión a la nube</div>';
-    return;
-  }
-  document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#888;font-size:12px">&#128269; Buscando...</div>';
-  try {
-    const snap=await getDocs(CLIENTES_COL);
-    const qNorm=q.toLowerCase().replace(/[.]/g,'');
-    window.DB.clientes=[];
-    snap.forEach(function(d){
-      try{
-        const c=JSON.parse(d.data().data);
-        const dniNorm=(c.dni||'').replace(/[.]/g,'');
-        const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
-        if(txt.includes(qNorm)) window.DB.clientes.push(c);
-      }catch(e){}
-    });
-    renderLista();
-  } catch(e){
-    document.getElementById('clientList').innerHTML='<div style="padding:14px;text-align:center;color:#aaa;font-size:12px">Error al buscar</div>';
-  }
+  _buscarTimer=setTimeout(function(){ renderLista(); },200);
 }
 
 function irPrimerResultado(){
   const q=(document.getElementById('srchInput').value||'').toLowerCase();
-  if(!q||q.length<3) return;
+  if(!q) return;
   const qNorm=q.replace(/[.]/g,'');
   const encontrado=DB.clientes.find(function(c){
     const dniNorm=(c.dni||'').replace(/[.]/g,'');
@@ -1823,7 +1816,6 @@ function renderHerramientas(){
     <div class="tb" onclick="setTabHerr('exportar',this)">Exportar clientes</div>
     <div class="tb" onclick="setTabHerr('backup',this)">Backup</div>
     <div class="tb" onclick="setTabHerr('mantenimiento',this)">&#9881; Mantenimiento</div>
-    <div class="tb" onclick="setTabHerr('duplicados',this)">&#128465; Limpiar duplicados</div>
     <div class="tb" onclick="setTabHerr('importtel',this)">&#128222; Importar Tel/Tr&#225;mites</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
@@ -1838,7 +1830,6 @@ function setTabHerr(tab,el){
   else if(tab==='exportar') renderExportar();
   else if(tab==='backup') renderBackupTab();
   else if(tab==='importtel') renderImportarTelTramites();
-  else if(tab==='duplicados') renderLimpiarDuplicados();
   else renderMantenimiento();
 }
 
@@ -1981,39 +1972,8 @@ window.confirmarImport = async function(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
   extraerDatosImport(n);
-  // Deduplicar contra clientes existentes por DNI
-  const nuevos=[];
-  const modificados=[];
-  n.forEach(function(nuevo){
-    const dniNorm=(nuevo.dni||'').replace(/[.]/g,'').trim();
-    if(!dniNorm){ nuevos.push(nuevo); return; }
-    const existente=DB.clientes.find(function(c){ return (c.dni||'').replace(/[.]/g,'').trim()===dniNorm; });
-    if(!existente){
-      nuevos.push(nuevo);
-    } else {
-      // Fusionar creditos nuevos que no existan
-      var credsMod=false;
-      (nuevo.creditos||[]).forEach(function(cr){
-        const yaExiste=(existente.creditos||[]).some(function(e){
-          return e.num&&cr.num&&e.num===cr.num;
-        });
-        if(!yaExiste){ if(!existente.creditos) existente.creditos=[]; existente.creditos.push(cr); credsMod=true; }
-      });
-      if(credsMod) modificados.push(existente);
-    }
-  });
-  // Guardar nuevos + modificados
-  const todosAGuardar=[...nuevos];
-  DB.clientes=[...DB.clientes,...nuevos];
-  const ok=await window.importarMasivo(nuevos,false);
-  // Guardar modificados por separado
-  if(modificados.length && ok){
-    for(var i=0;i<modificados.length;i++){ await window.saveDB(modificados[i]); }
-  }
-  if(ok){ 
-    renderLista(); 
-    document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; '+nuevos.length+' clientes nuevos importados'+(modificados.length?' · '+modificados.length+' clientes actualizados':'')+'</strong></div>'; 
-  }
+  const ok=await window.importarMasivo(n,false);
+  if(ok){ renderLista(); document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; '+n.length+' clientes importados</strong></div>'; }
   window._importTemp=null;
 };
 window.confirmarReemplazar = async function(){
@@ -2510,117 +2470,6 @@ function aplicarImportTelTramites(){
 // ═══════════════════════════════════════════════════
 // MANTENIMIENTO — Renombrado masivo de carteras
 // ═══════════════════════════════════════════════════
-function renderLimpiarDuplicados(){
-  const el=document.getElementById('herrContent');
-  // Buscar duplicados por DNI
-  const dniCount={};
-  DB.clientes.forEach(function(c){
-    const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni) return;
-    if(!dniCount[dni]) dniCount[dni]=[];
-    dniCount[dni].push(c);
-  });
-  const duplicados=Object.values(dniCount).filter(function(arr){ return arr.length>1; });
-  const total=duplicados.reduce(function(s,arr){ return s+(arr.length-1); },0);
-  
-  if(!duplicados.length){
-    el.innerHTML='<div class="card"><div class="card-title" style="margin-bottom:12px">Limpiar duplicados</div>'+
-      '<div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">&#10003; No se encontraron clientes duplicados en la base.</div></div>';
-    return;
-  }
-
-  el.innerHTML='<div class="card">'+
-    '<div class="card-hdr"><div class="card-title">Limpiar duplicados</div>'+
-    '<button class="btn btn-dark btn-sm" onclick="ejecutarLimpiezaDuplicados()">&#128465; Eliminar '+total+' duplicados</button></div>'+
-    '<div style="background:#FAEEDA;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:#633806">'+
-    '<strong>&#9888; Se encontraron '+duplicados.length+' DNI con registros duplicados ('+total+' extras a eliminar).</strong><br>'+
-    'Se conservar&aacute; el registro con m&aacute;s datos y se fusionar&aacute;n los cr&eacute;ditos &uacute;nicos.'+
-    '</div>'+
-    '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>DNI</th><th>Nombre</th><th>Copias</th><th>Entidades</th></tr></thead><tbody>'+
-    duplicados.slice(0,50).map(function(arr){
-      const ents=[...new Set(arr.flatMap(function(c){ return (c.creditos||[]).map(function(cr){ return cr.entidad||c.entidad||''; }); }).filter(Boolean))].join(', ');
-      return '<tr><td>'+arr[0].dni+'</td><td>'+arr[0].nombre+'</td><td>'+arr.length+'</td><td>'+ents+'</td></tr>';
-    }).join('')+
-    (duplicados.length>50?'<tr><td colspan="4" style="color:#888;text-align:center">... y '+(duplicados.length-50)+' m&aacute;s</td></tr>':'')+
-    '</tbody></table></div></div>';
-}
-
-async function ejecutarLimpiezaDuplicados(){
-  if(!confirm('Eliminar duplicados y fusionar créditos. ¿Confirmás?')) return;
-  const el=document.getElementById('herrContent');
-
-  // Agrupar por DNI
-  const dniMap={};
-  DB.clientes.forEach(function(c){
-    const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni) return;
-    if(!dniMap[dni]) dniMap[dni]=[];
-    dniMap[dni].push(c);
-  });
-
-  const aEliminarIds=[];
-  const aModificar=[];
-
-  Object.values(dniMap).forEach(function(arr){
-    if(arr.length<=1) return;
-    arr.sort(function(a,b){ return JSON.stringify(b).length - JSON.stringify(a).length; });
-    const principal=arr[0];
-    arr.slice(1).forEach(function(dup){
-      (dup.creditos||[]).forEach(function(cr){
-        const yaExiste=(principal.creditos||[]).some(function(e){ return e.num&&cr.num&&e.num===cr.num; });
-        if(!yaExiste){ if(!principal.creditos) principal.creditos=[]; principal.creditos.push(cr); }
-      });
-      (dup.telefonos||[]).forEach(function(t){ if(t&&!(principal.telefonos||[]).includes(t)){ if(!principal.telefonos) principal.telefonos=[]; principal.telefonos.push(t); } });
-      aEliminarIds.push(dup.id);
-    });
-    aModificar.push(principal);
-  });
-
-  if(!aEliminarIds.length){
-    el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A">&#10003; No hay duplicados.</div></div>';
-    return;
-  }
-
-  // Eliminar de DB local
-  DB.clientes=DB.clientes.filter(function(c){ return !aEliminarIds.includes(c.id); });
-
-  const LOTE=500;
-  let procesados=0;
-  const total=aEliminarIds.length+aModificar.length;
-
-  function actualizarProg(){
-    procesados++;
-    el.innerHTML='<div class="card"><div style="color:#2557a7;padding:16px">&#128190; Procesando '+procesados+' de '+total+'...</div>'+
-      '<div style="background:#dce8f5;border-radius:6px;height:8px;margin:10px 16px"><div style="background:#2557a7;border-radius:6px;height:8px;width:'+Math.round(procesados/total*100)+'%"></div></div></div>';
-  }
-
-  // Guardar modificados en Firebase (con creditos fusionados)
-  for(let i=0;i<aModificar.length;i++){
-    await window.saveDB(aModificar[i]);
-    actualizarProg();
-    if(i%10===9) await new Promise(r=>setTimeout(r,50)); // respiro cada 10
-  }
-
-  // Eliminar duplicados en Firebase por lotes
-  for(let i=0;i<aEliminarIds.length;i+=LOTE){
-    const lote=aEliminarIds.slice(i,i+LOTE);
-    for(let j=0;j<lote.length;j++){
-      if(typeof window.deleteClienteDB==='function') await window.deleteClienteDB(lote[j]);
-      actualizarProg();
-    }
-    await new Promise(r=>setTimeout(r,200)); // pausa entre lotes
-  }
-
-  // Actualizar localStorage
-  try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados,clientes:DB.clientes})); }catch(e){}
-
-  renderLista();
-  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">'+
-    '<strong>&#10003; Limpieza completada</strong><br>'+
-    aEliminarIds.length+' duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
-    '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
-}
-
 function renderMantenimiento(){
   const el=document.getElementById('herrContent');
   const reglas=[
