@@ -2635,13 +2635,7 @@ async function ejecutarLimpiezaDuplicados(){
     '<strong>✓ Limpieza completada</strong><br>'+aEliminar.length+' duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
     '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
 }
-  renderLista();
-  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">'+
-    '<strong>&#10003; Limpieza completada</strong><br>'+
-    aEliminar.length+' registros duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
-    '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
-}
-
+  
 function renderMantenimiento(){
   const el=document.getElementById('herrContent');
   const reglas=[
