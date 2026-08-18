@@ -2577,55 +2577,64 @@ function renderLimpiarDuplicados(){
 async function ejecutarLimpiezaDuplicados(){
   if(!confirm('Eliminar duplicados y fusionar créditos. ¿Confirmás?')) return;
   const el=document.getElementById('herrContent');
-  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:16px">&#128190; Procesando...</div></div>';
-  
-  // Agrupar por DNI
+
   const dniMap={};
   DB.clientes.forEach(function(c){
     const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni){ return; }
+    if(!dni) return;
     if(!dniMap[dni]) dniMap[dni]=[];
     dniMap[dni].push(c);
   });
 
   const aEliminar=[];
   const aModificar=[];
-
   Object.values(dniMap).forEach(function(arr){
     if(arr.length<=1) return;
-    // Ordenar: el que tiene mas datos primero
-    arr.sort(function(a,b){ return (JSON.stringify(b).length)-(JSON.stringify(a).length); });
+    arr.sort(function(a,b){ return JSON.stringify(b).length-JSON.stringify(a).length; });
     const principal=arr[0];
-    // Fusionar creditos unicos de los duplicados
     arr.slice(1).forEach(function(dup){
       (dup.creditos||[]).forEach(function(cr){
-        const yaExiste=(principal.creditos||[]).some(function(e){
-          return e.num&&cr.num&&e.num===cr.num;
-        });
+        const yaExiste=(principal.creditos||[]).some(function(e){ return e.num&&cr.num&&e.num===cr.num; });
         if(!yaExiste){ if(!principal.creditos) principal.creditos=[]; principal.creditos.push(cr); }
       });
-      // Fusionar telefonos
       (dup.telefonos||[]).forEach(function(t){ if(t&&!(principal.telefonos||[]).includes(t)){ if(!principal.telefonos) principal.telefonos=[]; principal.telefonos.push(t); } });
-      // Marcar para eliminar
       aEliminar.push(dup.id);
     });
     aModificar.push(principal);
   });
 
-  // Eliminar duplicados de DB local
   DB.clientes=DB.clientes.filter(function(c){ return !aEliminar.includes(c.id); });
-  
-  // Guardar modificados en Firebase
-  for(var i=0;i<aModificar.length;i++){
-    await window.saveDB(aModificar[i]);
-  }
-  // Eliminar duplicados en Firebase
-  if(typeof window.deleteClienteDB === 'function'){
-    for(var i=0;i<aEliminar.length;i++){
-      await window.deleteClienteDB(aEliminar[i]);
-    }
+
+  const total=aEliminar.length+aModificar.length;
+  let procesados=0;
+
+  function prog(txt){
+    procesados++;
+    const pct=Math.round(procesados/total*100);
+    el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px 16px">'+txt+' ('+procesados+'/'+total+')</div>'+
+      '<div style="background:#dce8f5;border-radius:4px;height:10px;margin:0 16px 16px"><div style="background:#2557a7;border-radius:4px;height:10px;width:'+pct+'%"></div></div></div>';
   }
 
+  // Guardar modificados de a uno con pausa cada 10
+  for(var i=0;i<aModificar.length;i++){
+    await window.saveDB(aModificar[i]);
+    prog('Actualizando clientes');
+    if(i%10===9) await new Promise(function(r){setTimeout(r,100);});
+  }
+
+  // Eliminar duplicados de a uno con pausa cada 50
+  for(var i=0;i<aEliminar.length;i++){
+    if(typeof window.deleteClienteDB==='function') await window.deleteClienteDB(aEliminar[i]);
+    prog('Eliminando duplicados');
+    if(i%50===49) await new Promise(function(r){setTimeout(r,200);});
+  }
+
+  try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados,clientes:DB.clientes})); }catch(e){}
+  renderLista();
+  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A">'+
+    '<strong>✓ Limpieza completada</strong><br>'+aEliminar.length+' duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
+    '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
+}
   renderLista();
   el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">'+
     '<strong>&#10003; Limpieza completada</strong><br>'+
