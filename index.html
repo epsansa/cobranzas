@@ -687,7 +687,6 @@ function buscarLista(){
   },500);
 }
 async function buscarEnFirebase(q){
-  actualizarIndicador('guardando');
   try {
     var snap=await getDocs(CLIENTES_COL);
     var qNorm=q.toLowerCase().replace(/\./g,'');
@@ -700,11 +699,10 @@ async function buscarEnFirebase(q){
         if(txt.includes(qNorm)) window.DB.clientes.push(c);
       }catch(e){}
     });
-    actualizarIndicador('ok');
     renderLista();
   } catch(e){
     console.error('Error buscando:',e);
-    actualizarIndicador('error');
+    document.getElementById('clientList').innerHTML='<div style="padding:14px;color:#aaa;font-size:12px">Error al buscar</div>';
   }
 }
 function irPrimerResultado(){
