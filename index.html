@@ -176,6 +176,7 @@ async function cargarDatos(){
     }
 
     window.DB.clientes=[];
+    window._clientesCompletos = false;
     if(!window.DB.comercios) window.DB.comercios=[];
 
     window._fbConnected=true;
@@ -204,6 +205,7 @@ async function cargarDatos(){
       const snap=await getDocs(CLIENTES_COL);
       window.DB.clientes=[];
       snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+      window._clientesCompletos = true; // DB.clientes tiene el universo completo, no un resultado de búsqueda parcial
       try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
       actualizarIndicador('ok');
       renderLista();
@@ -691,6 +693,7 @@ function buscarLista(){
       buscarEnFirebase(q);
     } else if(q.length===0){
       window.DB.clientes=[];
+      window._clientesCompletos=false;
       renderLista();
     }
   },500);
@@ -700,6 +703,7 @@ async function buscarEnFirebase(q){
     var snap=await window.getDocs(window.CLIENTES_COL);
     var qNorm=q.toLowerCase().replace(/\./g,'');
     window.DB.clientes=[];
+    window._clientesCompletos=false; // es un resultado de búsqueda parcial, no el universo completo
     snap.forEach(function(d){
       try{
         var c=JSON.parse(d.data().data);
@@ -762,6 +766,15 @@ function renderFicha(){
 function setTabAdmin(id){
   tabActiva=id;
   document.querySelectorAll('.tb').forEach(t=>t.classList.toggle('active',t.textContent.trim()===TABS_ADMIN.find(x=>x.id===id)?.label));
+  if(id==='avanzada' && !window._clientesCompletos && typeof window.refrescarClientes==='function'){
+    // La pestaña Avanzada necesita el universo completo de clientes para filtrar
+    // por cartera/entidad/estado — si sólo hay un resultado de búsqueda cargado, lo traemos entero.
+    renderTab(); // mostrar de entrada lo que haya, con indicador de carga
+    const el=document.getElementById('avanzada-resultado');
+    if(el) el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Cargando clientes…</div>';
+    window.refrescarClientes().then(function(){ if(tabActiva==='avanzada') renderTab(); });
+    return;
+  }
   renderTab();
 }
 
