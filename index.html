@@ -99,7 +99,6 @@ window.saveDB=function(clienteModificado){
     const bkKey='epsan_bk_'+hoy;
     if(!localStorage.getItem(bkKey)){ localStorage.setItem(bkKey,JSON.stringify(window.DB)); const bkKeys=Object.keys(localStorage).filter(k=>k.startsWith('epsan_bk_')).sort(); while(bkKeys.length>3) localStorage.removeItem(bkKeys.shift()); }
   } catch(e){}
-  if(clienteModificado) window._todosClientesCache = null; // se modificó un cliente: invalidar caché
   window._fbSaving=true; actualizarIndicador('guardando');
   clearTimeout(_saveTimer);
   _saveTimer=setTimeout(async function(){
@@ -118,7 +117,6 @@ window.saveDBConfig=function(){ window.saveDB(null); };
 
 window.deleteClienteDB=async function(id){
   window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
-  window._todosClientesCache = null; // invalidar caché: un cliente fue eliminado
   try{ await deleteDoc(doc(db_fs,'clientes',id)); }catch(e){}
   try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
 };
@@ -144,7 +142,6 @@ window.importarMasivo=async function(clientes,reemplazar){
     }
     await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
-    window._todosClientesCache = null; // invalidar caché: se importaron/reemplazaron clientes
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
@@ -179,7 +176,6 @@ async function cargarDatos(){
     }
 
     window.DB.clientes=[];
-    window._clientesCompletos = false;
     if(!window.DB.comercios) window.DB.comercios=[];
 
     window._fbConnected=true;
@@ -193,8 +189,7 @@ async function cargarDatos(){
 
     // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
     // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
-    if(window._unsubConfig) window._unsubConfig(); // por si quedó uno de una sesión anterior
-    window._unsubConfig = onSnapshot(CONFIG_REF,function(snap){
+    onSnapshot(CONFIG_REF,function(snap){
       if(!snap.exists()) return;
       const cfg=snap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades;
@@ -202,33 +197,12 @@ async function cargarDatos(){
       window.DB.comercios=cfg.comercios||window.DB.comercios;
     });
 
-    // 4. Traer TODOS los clientes, con caché: si ya se cargaron antes (o hay una
-    // carga en curso), reutiliza eso en vez de volver a pegarle a Firestore.
-    // Solo "forzar=true" (botón Sincronizar) vuelve a descargar desde cero.
-    window.obtenerTodosClientes = async function(forzar){
-      if(!forzar && window._todosClientesCache){
-        return window._todosClientesCache;
-      }
-      if(!forzar && window._cargandoClientesPromesa){
-        return window._cargandoClientesPromesa;
-      }
-      window._cargandoClientesPromesa = (async function(){
-        const snap = await getDocs(CLIENTES_COL);
-        const arr = [];
-        snap.forEach(function(d){ try{ arr.push(JSON.parse(d.data().data)); }catch(e){} });
-        window._todosClientesCache = arr;
-        window._cargandoClientesPromesa = null;
-        return arr;
-      })();
-      return window._cargandoClientesPromesa;
-    };
-
-    // Botón "⟳ Sincronizar" — fuerza traer todo de nuevo (ignora la caché)
+    // 4. Botón para refrescar clientes manualmente si lo necesitan
     window.refrescarClientes = async function(){
       actualizarIndicador('conectando');
-      const arr = await window.obtenerTodosClientes(true);
-      window.DB.clientes = arr;
-      window._clientesCompletos = true; // DB.clientes tiene el universo completo, no un resultado de búsqueda parcial
+      const snap=await getDocs(CLIENTES_COL);
+      window.DB.clientes=[];
+      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
       try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
       actualizarIndicador('ok');
       renderLista();
@@ -255,9 +229,7 @@ onAuthStateChanged(auth, function(user){
     mostrarApp();
     var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
   } else {
-    // No logueado — dar de baja listeners activos de Firestore para evitar
-    // errores de "permission-denied" (las reglas exigen request.auth != null)
-    if(window._unsubConfig){ window._unsubConfig(); window._unsubConfig=null; }
+    // No logueado — mostrar pantalla de login
     mostrarLogin();
   }
 });
@@ -293,7 +265,6 @@ window.saveMuchos = async function(clientes, config){
       });
     }
     try{localStorage.setItem("epsan_v3",JSON.stringify(window.DB));}catch(e){}
-    window._todosClientesCache = null; // invalidar caché: se guardaron clientes en lote
     window._fbLastSave=new Date();
     window._fbSaving=false;
     actualizarIndicador("ok");
@@ -308,12 +279,6 @@ window.saveMuchos = async function(clientes, config){
 };
 
 window._fbActualizarIndicador=actualizarIndicador;
-
-// Exponer al scope global lo que necesita el segundo <script> (sin type="module"),
-// ya que los imports de un módulo no son visibles fuera de él.
-window.getDocs = getDocs;
-window.CLIENTES_COL = CLIENTES_COL;
-window.db_fs = db_fs;
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -717,26 +682,29 @@ function buscarLista(){
       buscarEnFirebase(q);
     } else if(q.length===0){
       window.DB.clientes=[];
-      window._clientesCompletos=false;
       renderLista();
     }
   },500);
 }
 async function buscarEnFirebase(q){
+  actualizarIndicador('guardando');
   try {
-    var todos=await window.obtenerTodosClientes();
+    var snap=await getDocs(CLIENTES_COL);
     var qNorm=q.toLowerCase().replace(/\./g,'');
-    window.DB.clientes=todos.filter(function(c){
+    window.DB.clientes=[];
+    snap.forEach(function(d){
       try{
+        var c=JSON.parse(d.data().data);
         var dniNorm=(c.dni||'').replace(/\./g,'');
         var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
-        return txt.includes(qNorm);
-      }catch(e){ return false; }
+        if(txt.includes(qNorm)) window.DB.clientes.push(c);
+      }catch(e){}
     });
+    actualizarIndicador('ok');
     renderLista();
   } catch(e){
     console.error('Error buscando:',e);
-    document.getElementById('clientList').innerHTML='<div style="padding:14px;color:#aaa;font-size:12px">Error al buscar</div>';
+    actualizarIndicador('error');
   }
 }
 function irPrimerResultado(){
@@ -787,16 +755,6 @@ function renderFicha(){
 function setTabAdmin(id){
   tabActiva=id;
   document.querySelectorAll('.tb').forEach(t=>t.classList.toggle('active',t.textContent.trim()===TABS_ADMIN.find(x=>x.id===id)?.label));
-  if(id==='avanzada' && !window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
-    // La pestaña Avanzada necesita el universo completo de clientes para filtrar
-    // por cartera/entidad/estado. Si ya está en caché, aplicarAvanzada() la usa directo
-    // (instantáneo); si es la primera vez en la sesión, la traemos una única vez.
-    renderTab(); // mostrar de entrada lo que haya, con indicador de carga
-    const el=document.getElementById('avanzada-resultado');
-    if(el) el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Cargando clientes…</div>';
-    window.obtenerTodosClientes().then(function(){ if(tabActiva==='avanzada') renderTab(); });
-    return;
-  }
   renderTab();
 }
 
@@ -867,8 +825,7 @@ function aplicarAvanzada(){
   const ent=document.getElementById('adv-ent').value;
   const car=document.getElementById('adv-car').value;
   const est=document.getElementById('adv-est').value;
-  const universo=window._todosClientesCache||DB.clientes;
-  const fil=universo.filter(c=>{
+  const fil=DB.clientes.filter(c=>{
     const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
     return enEnt && enCar && (!est||c.estado===est);
@@ -2620,65 +2577,62 @@ function renderLimpiarDuplicados(){
 async function ejecutarLimpiezaDuplicados(){
   if(!confirm('Eliminar duplicados y fusionar créditos. ¿Confirmás?')) return;
   const el=document.getElementById('herrContent');
-
+  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:16px">&#128190; Procesando...</div></div>';
+  
+  // Agrupar por DNI
   const dniMap={};
   DB.clientes.forEach(function(c){
     const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni) return;
+    if(!dni){ return; }
     if(!dniMap[dni]) dniMap[dni]=[];
     dniMap[dni].push(c);
   });
 
   const aEliminar=[];
   const aModificar=[];
+
   Object.values(dniMap).forEach(function(arr){
     if(arr.length<=1) return;
-    arr.sort(function(a,b){ return JSON.stringify(b).length-JSON.stringify(a).length; });
+    // Ordenar: el que tiene mas datos primero
+    arr.sort(function(a,b){ return (JSON.stringify(b).length)-(JSON.stringify(a).length); });
     const principal=arr[0];
+    // Fusionar creditos unicos de los duplicados
     arr.slice(1).forEach(function(dup){
       (dup.creditos||[]).forEach(function(cr){
-        const yaExiste=(principal.creditos||[]).some(function(e){ return e.num&&cr.num&&e.num===cr.num; });
+        const yaExiste=(principal.creditos||[]).some(function(e){
+          return e.num&&cr.num&&e.num===cr.num;
+        });
         if(!yaExiste){ if(!principal.creditos) principal.creditos=[]; principal.creditos.push(cr); }
       });
+      // Fusionar telefonos
       (dup.telefonos||[]).forEach(function(t){ if(t&&!(principal.telefonos||[]).includes(t)){ if(!principal.telefonos) principal.telefonos=[]; principal.telefonos.push(t); } });
+      // Marcar para eliminar
       aEliminar.push(dup.id);
     });
     aModificar.push(principal);
   });
 
+  // Eliminar duplicados de DB local
   DB.clientes=DB.clientes.filter(function(c){ return !aEliminar.includes(c.id); });
-
-  const total=aEliminar.length+aModificar.length;
-  let procesados=0;
-
-  function prog(txt){
-    procesados++;
-    const pct=Math.round(procesados/total*100);
-    el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px 16px">'+txt+' ('+procesados+'/'+total+')</div>'+
-      '<div style="background:#dce8f5;border-radius:4px;height:10px;margin:0 16px 16px"><div style="background:#2557a7;border-radius:4px;height:10px;width:'+pct+'%"></div></div></div>';
-  }
-
-  // Guardar modificados de a uno con pausa cada 10
+  
+  // Guardar modificados en Firebase
   for(var i=0;i<aModificar.length;i++){
     await window.saveDB(aModificar[i]);
-    prog('Actualizando clientes');
-    if(i%10===9) await new Promise(function(r){setTimeout(r,100);});
+  }
+  // Eliminar duplicados en Firebase
+  if(typeof window.deleteClienteDB === 'function'){
+    for(var i=0;i<aEliminar.length;i++){
+      await window.deleteClienteDB(aEliminar[i]);
+    }
   }
 
-  // Eliminar duplicados de a uno con pausa cada 50
-  for(var i=0;i<aEliminar.length;i++){
-    if(typeof window.deleteClienteDB==='function') await window.deleteClienteDB(aEliminar[i]);
-    prog('Eliminando duplicados');
-    if(i%50===49) await new Promise(function(r){setTimeout(r,200);});
-  }
-
-  try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados,clientes:DB.clientes})); }catch(e){}
   renderLista();
-  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A">'+
-    '<strong>✓ Limpieza completada</strong><br>'+aEliminar.length+' duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
+  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">'+
+    '<strong>&#10003; Limpieza completada</strong><br>'+
+    aEliminar.length+' registros duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
     '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
 }
-  
+
 function renderMantenimiento(){
   const el=document.getElementById('herrContent');
   const reglas=[
