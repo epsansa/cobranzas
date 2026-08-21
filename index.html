@@ -99,6 +99,7 @@ window.saveDB=function(clienteModificado){
     const bkKey='epsan_bk_'+hoy;
     if(!localStorage.getItem(bkKey)){ localStorage.setItem(bkKey,JSON.stringify(window.DB)); const bkKeys=Object.keys(localStorage).filter(k=>k.startsWith('epsan_bk_')).sort(); while(bkKeys.length>3) localStorage.removeItem(bkKeys.shift()); }
   } catch(e){}
+  if(clienteModificado) window._todosClientesCache = null; // se modificó un cliente: invalidar caché
   window._fbSaving=true; actualizarIndicador('guardando');
   clearTimeout(_saveTimer);
   _saveTimer=setTimeout(async function(){
@@ -117,6 +118,7 @@ window.saveDBConfig=function(){ window.saveDB(null); };
 
 window.deleteClienteDB=async function(id){
   window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
+  window._todosClientesCache = null; // invalidar caché: un cliente fue eliminado
   try{ await deleteDoc(doc(db_fs,'clientes',id)); }catch(e){}
   try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
 };
@@ -142,6 +144,7 @@ window.importarMasivo=async function(clientes,reemplazar){
     }
     await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+    window._todosClientesCache = null; // invalidar caché: se importaron/reemplazaron clientes
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
@@ -199,12 +202,32 @@ async function cargarDatos(){
       window.DB.comercios=cfg.comercios||window.DB.comercios;
     });
 
-    // 4. Botón para refrescar clientes manualmente si lo necesitan
+    // 4. Traer TODOS los clientes, con caché: si ya se cargaron antes (o hay una
+    // carga en curso), reutiliza eso en vez de volver a pegarle a Firestore.
+    // Solo "forzar=true" (botón Sincronizar) vuelve a descargar desde cero.
+    window.obtenerTodosClientes = async function(forzar){
+      if(!forzar && window._todosClientesCache){
+        return window._todosClientesCache;
+      }
+      if(!forzar && window._cargandoClientesPromesa){
+        return window._cargandoClientesPromesa;
+      }
+      window._cargandoClientesPromesa = (async function(){
+        const snap = await getDocs(CLIENTES_COL);
+        const arr = [];
+        snap.forEach(function(d){ try{ arr.push(JSON.parse(d.data().data)); }catch(e){} });
+        window._todosClientesCache = arr;
+        window._cargandoClientesPromesa = null;
+        return arr;
+      })();
+      return window._cargandoClientesPromesa;
+    };
+
+    // Botón "⟳ Sincronizar" — fuerza traer todo de nuevo (ignora la caché)
     window.refrescarClientes = async function(){
       actualizarIndicador('conectando');
-      const snap=await getDocs(CLIENTES_COL);
-      window.DB.clientes=[];
-      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+      const arr = await window.obtenerTodosClientes(true);
+      window.DB.clientes = arr;
       window._clientesCompletos = true; // DB.clientes tiene el universo completo, no un resultado de búsqueda parcial
       try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
       actualizarIndicador('ok');
@@ -270,6 +293,7 @@ window.saveMuchos = async function(clientes, config){
       });
     }
     try{localStorage.setItem("epsan_v3",JSON.stringify(window.DB));}catch(e){}
+    window._todosClientesCache = null; // invalidar caché: se guardaron clientes en lote
     window._fbLastSave=new Date();
     window._fbSaving=false;
     actualizarIndicador("ok");
@@ -700,17 +724,14 @@ function buscarLista(){
 }
 async function buscarEnFirebase(q){
   try {
-    var snap=await window.getDocs(window.CLIENTES_COL);
+    var todos=await window.obtenerTodosClientes();
     var qNorm=q.toLowerCase().replace(/\./g,'');
-    window.DB.clientes=[];
-    window._clientesCompletos=false; // es un resultado de búsqueda parcial, no el universo completo
-    snap.forEach(function(d){
+    window.DB.clientes=todos.filter(function(c){
       try{
-        var c=JSON.parse(d.data().data);
         var dniNorm=(c.dni||'').replace(/\./g,'');
         var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
-        if(txt.includes(qNorm)) window.DB.clientes.push(c);
-      }catch(e){}
+        return txt.includes(qNorm);
+      }catch(e){ return false; }
     });
     renderLista();
   } catch(e){
@@ -766,13 +787,14 @@ function renderFicha(){
 function setTabAdmin(id){
   tabActiva=id;
   document.querySelectorAll('.tb').forEach(t=>t.classList.toggle('active',t.textContent.trim()===TABS_ADMIN.find(x=>x.id===id)?.label));
-  if(id==='avanzada' && !window._clientesCompletos && typeof window.refrescarClientes==='function'){
+  if(id==='avanzada' && !window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
     // La pestaña Avanzada necesita el universo completo de clientes para filtrar
-    // por cartera/entidad/estado — si sólo hay un resultado de búsqueda cargado, lo traemos entero.
+    // por cartera/entidad/estado. Si ya está en caché, aplicarAvanzada() la usa directo
+    // (instantáneo); si es la primera vez en la sesión, la traemos una única vez.
     renderTab(); // mostrar de entrada lo que haya, con indicador de carga
     const el=document.getElementById('avanzada-resultado');
     if(el) el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Cargando clientes…</div>';
-    window.refrescarClientes().then(function(){ if(tabActiva==='avanzada') renderTab(); });
+    window.obtenerTodosClientes().then(function(){ if(tabActiva==='avanzada') renderTab(); });
     return;
   }
   renderTab();
@@ -845,7 +867,8 @@ function aplicarAvanzada(){
   const ent=document.getElementById('adv-ent').value;
   const car=document.getElementById('adv-car').value;
   const est=document.getElementById('adv-est').value;
-  const fil=DB.clientes.filter(c=>{
+  const universo=window._todosClientesCache||DB.clientes;
+  const fil=universo.filter(c=>{
     const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
     return enEnt && enCar && (!est||c.estado===est);
