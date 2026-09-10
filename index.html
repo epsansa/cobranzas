@@ -1519,17 +1519,27 @@ function confirmarPago(){
   var monto=parseFloat(document.getElementById('pago-monto').value)||0;
   var fecha=document.getElementById('pago-fecha').value;
   var nota=document.getElementById('pago-nota').value.trim();
-  if(!monto){alert('Ingres\u00e1 el monto');return;}
+  if(!monto){alert('Ingresá el monto');return;}
   var ci=window._pagoCI;var pi=window._pagoPI;
-  var cuota=clienteActivo.creditos[ci].plan[pi];
-  var original=cuota.monto||0;
-  var dif=monto-original;
   var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
   var p=DB.clientes[idx].creditos[ci].plan[pi];
-  p.montoPagado=monto;p.fechaPago=fecha;p.notaPago=nota;
-  if(Math.abs(dif)<1){ p.pagada=true;p.pagadaParcial=false;p.saldo=0; }
-  else if(dif<0){ p.pagada=false;p.pagadaParcial=true;p.saldo=Math.abs(dif); }
-  else { p.pagada=true;p.pagadaParcial=false;p.saldo=0;p.recargo=dif; }
+  var original=p.monto||0;
+  // Acumular pagos parciales
+  var montoPrevio=p.montoPagado||0;
+  var totalPagado=montoPrevio+monto;
+  var dif=totalPagado-original;
+  // Registrar historial de pagos
+  if(!p.historialPagos) p.historialPagos=[];
+  p.historialPagos.push({monto:monto,fecha:fecha,nota:nota});
+  p.montoPagado=totalPagado;
+  p.fechaPago=fecha;
+  p.notaPago=nota;
+  if(dif>=0){
+    p.pagada=true;p.pagadaParcial=false;p.saldo=0;
+    if(dif>0) p.recargo=dif;
+  } else {
+    p.pagada=false;p.pagadaParcial=true;p.saldo=Math.abs(dif);
+  }
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);cerrarModal('modalPago');setTabAdmin('cuenta');
 }
