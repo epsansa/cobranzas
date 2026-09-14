@@ -1486,24 +1486,58 @@ function guardarPlan(){
 
 function toggleCuota(ci,pi){
   var cuota=clienteActivo.creditos[ci].plan[pi];
-  if(cuota.pagada||cuota.pagadaParcial){
-    if(!confirm('\u00bfDeshacer el pago de esta cuota?')) return;
+  if(cuota.pagada){
+    if(!confirm('¿Deshacer el pago completo de esta cuota?')) return;
     var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
     var p=DB.clientes[idx].creditos[ci].plan[pi];
-    p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;
+    p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;p.historialPagos=[];
     clienteActivo=DB.clientes[idx];
     saveDB(clienteActivo);setTabAdmin('cuenta');
+  } else if(cuota.pagadaParcial){
+    // Tiene pago parcial - ofrecer agregar mas o deshacer
+    var saldo=cuota.saldo||0;
+    var pagado=cuota.montoPagado||0;
+    var opcion=confirm(
+      '⚠️ Cuota con pago parcial
+
+'+
+      'Pagado: $'+Math.round(pagado).toLocaleString('es-AR')+'
+'+
+      'Saldo pendiente: $'+Math.round(saldo).toLocaleString('es-AR')+'
+
+'+
+      'Aceptar = Agregar otro pago
+Cancelar = Deshacer todo'
+    );
+    if(opcion){
+      // Abrir modal para agregar pago
+      abrirModalPago(ci,pi);
+    } else {
+      if(!confirm('¿Deshacer todos los pagos de esta cuota?')) return;
+      var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
+      var p=DB.clientes[idx].creditos[ci].plan[pi];
+      p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;p.historialPagos=[];
+      clienteActivo=DB.clientes[idx];
+      saveDB(clienteActivo);setTabAdmin('cuenta');
+    }
   } else {
-    window._pagoCI=ci;window._pagoPI=pi;
-    var monto=cuota.monto||0;
-    document.getElementById('pago-monto').value=monto;
-    document.getElementById('pago-fecha').value=new Date().toISOString().slice(0,10);
-    document.getElementById('pago-nota').value='';
-    document.getElementById('pago-original').textContent='$'+Math.round(monto).toLocaleString('es-AR');
-    document.getElementById('pago-diferencia').textContent='\u2014';
-    document.getElementById('pago-diferencia').style.color='#555';
-    document.getElementById('modalPago').classList.add('open');
+    abrirModalPago(ci,pi);
   }
+}
+
+function abrirModalPago(ci,pi){
+  var cuota=clienteActivo.creditos[ci].plan[pi];
+  window._pagoCI=ci;window._pagoPI=pi;
+  var monto=cuota.monto||0;
+  var saldo=cuota.saldo||0;
+  var pagado=cuota.montoPagado||0;
+  document.getElementById('pago-monto').value=saldo>0?saldo:monto;
+  document.getElementById('pago-fecha').value=new Date().toISOString().slice(0,10);
+  document.getElementById('pago-nota').value='';
+  document.getElementById('pago-original').textContent='$'+Math.round(monto).toLocaleString('es-AR')+(pagado>0?' — pagado: $'+Math.round(pagado).toLocaleString('es-AR'):'');
+  document.getElementById('pago-diferencia').textContent=saldo>0?'Saldo pendiente: $'+Math.round(saldo).toLocaleString('es-AR'):'—';
+  document.getElementById('pago-diferencia').style.color=saldo>0?'#854F0B':'#555';
+  document.getElementById('modalPago').classList.add('open');
 }
 function calcDiferenciaPago(){
   var cuota=clienteActivo.creditos[window._pagoCI].plan[window._pagoPI];
