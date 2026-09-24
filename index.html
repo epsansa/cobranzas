@@ -687,8 +687,8 @@ function buscarLista(){
   },500);
 }
 async function buscarEnFirebase(q){
-  actualizarIndicador('guardando');
   try {
+    if(window._fbActualizarIndicador) window._fbActualizarIndicador('guardando');
     var snap=await getDocs(CLIENTES_COL);
     var qNorm=q.toLowerCase().replace(/\./g,'');
     window.DB.clientes=[];
@@ -700,11 +700,11 @@ async function buscarEnFirebase(q){
         if(txt.includes(qNorm)) window.DB.clientes.push(c);
       }catch(e){}
     });
-    actualizarIndicador('ok');
+    if(window._fbActualizarIndicador) window._fbActualizarIndicador('ok');
     renderLista();
   } catch(e){
     console.error('Error buscando:',e);
-    actualizarIndicador('error');
+    if(window._fbActualizarIndicador) window._fbActualizarIndicador('error');
   }
 }
 function irPrimerResultado(){
