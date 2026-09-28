@@ -99,6 +99,7 @@ window.saveDB=function(clienteModificado){
     const bkKey='epsan_bk_'+hoy;
     if(!localStorage.getItem(bkKey)){ localStorage.setItem(bkKey,JSON.stringify(window.DB)); const bkKeys=Object.keys(localStorage).filter(k=>k.startsWith('epsan_bk_')).sort(); while(bkKeys.length>3) localStorage.removeItem(bkKeys.shift()); }
   } catch(e){}
+  if(clienteModificado) window._todosClientesCache = null; // se modificó un cliente: invalidar caché
   window._fbSaving=true; actualizarIndicador('guardando');
   clearTimeout(_saveTimer);
   _saveTimer=setTimeout(async function(){
@@ -117,6 +118,7 @@ window.saveDBConfig=function(){ window.saveDB(null); };
 
 window.deleteClienteDB=async function(id){
   window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
+  window._todosClientesCache = null; // invalidar caché: un cliente fue eliminado
   try{ await deleteDoc(doc(db_fs,'clientes',id)); }catch(e){}
   try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
 };
@@ -142,6 +144,7 @@ window.importarMasivo=async function(clientes,reemplazar){
     }
     await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
+    window._todosClientesCache = null; // invalidar caché: se importaron/reemplazaron clientes
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
@@ -176,6 +179,7 @@ async function cargarDatos(){
     }
 
     window.DB.clientes=[];
+    window._clientesCompletos = false;
     if(!window.DB.comercios) window.DB.comercios=[];
 
     window._fbConnected=true;
@@ -189,7 +193,8 @@ async function cargarDatos(){
 
     // 3. Solo escuchar cambios en CONFIG (documento pequeño, bajo consumo)
     // No escuchar CLIENTES_COL completo — eso genera 10.000 lecturas
-    onSnapshot(CONFIG_REF,function(snap){
+    if(window._unsubConfig) window._unsubConfig(); // por si quedó uno de una sesión anterior
+    window._unsubConfig = onSnapshot(CONFIG_REF,function(snap){
       if(!snap.exists()) return;
       const cfg=snap.data();
       window.DB.entidades=cfg.entidades||window.DB.entidades;
@@ -197,12 +202,33 @@ async function cargarDatos(){
       window.DB.comercios=cfg.comercios||window.DB.comercios;
     });
 
-    // 4. Botón para refrescar clientes manualmente si lo necesitan
+    // 4. Traer TODOS los clientes, con caché: si ya se cargaron antes (o hay una
+    // carga en curso), reutiliza eso en vez de volver a pegarle a Firestore.
+    // Solo "forzar=true" (botón Sincronizar) vuelve a descargar desde cero.
+    window.obtenerTodosClientes = async function(forzar){
+      if(!forzar && window._todosClientesCache){
+        return window._todosClientesCache;
+      }
+      if(!forzar && window._cargandoClientesPromesa){
+        return window._cargandoClientesPromesa;
+      }
+      window._cargandoClientesPromesa = (async function(){
+        const snap = await getDocs(CLIENTES_COL);
+        const arr = [];
+        snap.forEach(function(d){ try{ arr.push(JSON.parse(d.data().data)); }catch(e){} });
+        window._todosClientesCache = arr;
+        window._cargandoClientesPromesa = null;
+        return arr;
+      })();
+      return window._cargandoClientesPromesa;
+    };
+
+    // Botón "⟳ Sincronizar" — fuerza traer todo de nuevo (ignora la caché)
     window.refrescarClientes = async function(){
       actualizarIndicador('conectando');
-      const snap=await getDocs(CLIENTES_COL);
-      window.DB.clientes=[];
-      snap.forEach(function(d){ try{ window.DB.clientes.push(JSON.parse(d.data().data)); }catch(e){} });
+      const arr = await window.obtenerTodosClientes(true);
+      window.DB.clientes = arr;
+      window._clientesCompletos = true; // DB.clientes tiene el universo completo, no un resultado de búsqueda parcial
       try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
       actualizarIndicador('ok');
       renderLista();
@@ -229,7 +255,9 @@ onAuthStateChanged(auth, function(user){
     mostrarApp();
     var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
   } else {
-    // No logueado — mostrar pantalla de login
+    // No logueado — dar de baja listeners activos de Firestore para evitar
+    // errores de "permission-denied" (las reglas exigen request.auth != null)
+    if(window._unsubConfig){ window._unsubConfig(); window._unsubConfig=null; }
     mostrarLogin();
   }
 });
@@ -265,6 +293,7 @@ window.saveMuchos = async function(clientes, config){
       });
     }
     try{localStorage.setItem("epsan_v3",JSON.stringify(window.DB));}catch(e){}
+    window._todosClientesCache = null; // invalidar caché: se guardaron clientes en lote
     window._fbLastSave=new Date();
     window._fbSaving=false;
     actualizarIndicador("ok");
@@ -279,6 +308,12 @@ window.saveMuchos = async function(clientes, config){
 };
 
 window._fbActualizarIndicador=actualizarIndicador;
+
+// Exponer al scope global lo que necesita el segundo <script> (sin type="module"),
+// ya que los imports de un módulo no son visibles fuera de él.
+window.getDocs = getDocs;
+window.CLIENTES_COL = CLIENTES_COL;
+window.db_fs = db_fs;
 </script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -421,6 +456,7 @@ a{color:inherit;text-decoration:none}
   </div>
   <div class="topnav-right">
     <span id="user-email"></span>
+    <button class="btn-logout" onclick="abrirSubdiario()" style="margin-right:4px" title="Subdiario de pagos">&#128209; Subdiario</button>
     <button class="btn-logout" onclick="window.refrescarClientes&&window.refrescarClientes()" style="margin-right:4px" title="Sincronizar clientes">&#8635; Sincronizar</button>
     <button class="btn-logout" onclick="logoutEpsan()">Salir</button>
   </div>
@@ -682,29 +718,26 @@ function buscarLista(){
       buscarEnFirebase(q);
     } else if(q.length===0){
       window.DB.clientes=[];
+      window._clientesCompletos=false;
       renderLista();
     }
   },500);
 }
 async function buscarEnFirebase(q){
   try {
-    if(window._fbActualizarIndicador) window._fbActualizarIndicador('guardando');
-    var snap=await getDocs(CLIENTES_COL);
+    var todos=await window.obtenerTodosClientes();
     var qNorm=q.toLowerCase().replace(/\./g,'');
-    window.DB.clientes=[];
-    snap.forEach(function(d){
+    window.DB.clientes=todos.filter(function(c){
       try{
-        var c=JSON.parse(d.data().data);
         var dniNorm=(c.dni||'').replace(/\./g,'');
         var txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(function(x){return x.num||'';}).join('')).toLowerCase();
-        if(txt.includes(qNorm)) window.DB.clientes.push(c);
-      }catch(e){}
+        return txt.includes(qNorm);
+      }catch(e){ return false; }
     });
-    if(window._fbActualizarIndicador) window._fbActualizarIndicador('ok');
     renderLista();
   } catch(e){
     console.error('Error buscando:',e);
-    if(window._fbActualizarIndicador) window._fbActualizarIndicador('error');
+    document.getElementById('clientList').innerHTML='<div style="padding:14px;color:#aaa;font-size:12px">Error al buscar</div>';
   }
 }
 function irPrimerResultado(){
@@ -755,6 +788,16 @@ function renderFicha(){
 function setTabAdmin(id){
   tabActiva=id;
   document.querySelectorAll('.tb').forEach(t=>t.classList.toggle('active',t.textContent.trim()===TABS_ADMIN.find(x=>x.id===id)?.label));
+  if(id==='avanzada' && !window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
+    // La pestaña Avanzada necesita el universo completo de clientes para filtrar
+    // por cartera/entidad/estado. Si ya está en caché, aplicarAvanzada() la usa directo
+    // (instantáneo); si es la primera vez en la sesión, la traemos una única vez.
+    renderTab(); // mostrar de entrada lo que haya, con indicador de carga
+    const el=document.getElementById('avanzada-resultado');
+    if(el) el.innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Cargando clientes…</div>';
+    window.obtenerTodosClientes().then(function(){ if(tabActiva==='avanzada') renderTab(); });
+    return;
+  }
   renderTab();
 }
 
@@ -825,7 +868,8 @@ function aplicarAvanzada(){
   const ent=document.getElementById('adv-ent').value;
   const car=document.getElementById('adv-car').value;
   const est=document.getElementById('adv-est').value;
-  const fil=DB.clientes.filter(c=>{
+  const universo=window._todosClientesCache||DB.clientes;
+  const fil=universo.filter(c=>{
     const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
     return enEnt && enCar && (!est||c.estado===est);
@@ -934,14 +978,20 @@ function renderCuenta(){
               estadoTxt= esAnticipo ? '💰 Anticipo' : '⏳ Pendiente';
             }
             const label= esAnticipo ? 'Ant' : 'C'+cuotaNum;
+            const detallePagos = (p.pagosHistorial && p.pagosHistorial.length>1) ?
+              '<div style="font-size:9.5px;color:#888;margin-top:2px;line-height:1.5">'+
+                p.pagosHistorial.map(function(x){
+                  var f=x.fecha?new Date(x.fecha+'T00:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}):'—';
+                  return f+': $'+Math.round(x.monto||0).toLocaleString('es-AR');
+                }).join(' · ')+
+              '</div>' : '';
             return '<div class="cuota-row-tbl '+(p.pagada?'cuota-pagada':'')+'" style="'+bg+'">'+
               '<div style="font-weight:'+(esAnticipo?'700':'400')+'">'+label+'</div>'+
               '<div>'+p.vto+'</div>'+
               '<div>$'+parseFloat(p.monto||0).toLocaleString('es-AR')+'</div>'+
-              '<div>'+estadoTxt+'</div>'+
+              '<div>'+estadoTxt+detallePagos+'</div>'+
               '<div>'+
               (p.pagadaParcial?'<div style="font-size:10px;color:#854F0B;margin-bottom:2px">Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR')+'</div>':'')+ 
-              ((p.pagada||p.pagadaParcial)?'<button class="btn btn-outline btn-sm" onclick="verHistorialPago('+i+','+pi+')" title="Ver historial" style="padding:3px 7px">&#128196;</button>':'')+
               '<button class="btn btn-sm '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
               '</div>'+
             '</div>';
@@ -1090,9 +1140,9 @@ if(cr.fecha){
     {label:'15 cuotas',nota:'',monto:c15},
   ];
   html+='<div style="font-size:12px;margin-bottom:12px">';
-  ops.forEach(function(o){
+  ops.forEach(function(o,i){
     html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0ec">';
-    html+='<span style="color:#555">'+o.label+'</span>';
+    html+='<span style="color:#555">'+(i+1)+') '+o.label+'</span>';
     html+='<span>'+(o.nota?'<span style="font-size:10px;color:#aaa;margin-right:8px">'+o.nota+'</span>':'')+'<strong>'+fmt(o.monto)+'</strong></span>';
     html+='</div>';
   });
@@ -1112,12 +1162,12 @@ if(cr.fecha){
     (credNums?'CR\u00c9DITO/S: '+credNums+'\n':'')+
     (comercio?'COMERCIO: '+comercio+'\n':'')+
     '\nDEUDA ACTUALIZADA: '+fmt(deudaAct)+'\n\n'+
-    '1 pago (con descuento): '+fmt(total1p)+'\n\n'+
-    '3 cuotas sin inter\u00e9s: '+fmt(c3)+'\n\n'+
-    '6 cuotas sin inter\u00e9s: '+fmt(c6)+'\n\n'+
-    '9 cuotas: '+fmt(c9)+'\n\n'+
-    '12 cuotas: '+fmt(c12)+'\n\n'+
-    '15 cuotas: '+fmt(c15);
+    '1) 1 pago (con descuento): '+fmt(total1p)+'\n\n'+
+    '2) 3 cuotas sin inter\u00e9s: '+fmt(c3)+'\n\n'+
+    '3) 6 cuotas sin inter\u00e9s: '+fmt(c6)+'\n\n'+
+    '4) 9 cuotas: '+fmt(c9)+'\n\n'+
+    '5) 12 cuotas: '+fmt(c12)+'\n\n'+
+    '6) 15 cuotas: '+fmt(c15);
 
   html+='<button class="btn btn-green" onclick="copiarResumenDS()" style="width:100%">&#128203; Copiar para WhatsApp / Mail</button>';
   html+='<div id="ds-txt-oculto" style="display:none">'+txtCopy+'</div>';
@@ -1485,116 +1535,201 @@ function guardarPlan(){
   saveDB(clienteActivo);cerrarModal('modalPlan');setTabAdmin('cuenta');
 }
 
-function verHistorialPago(ci,pi){
-  var cuota=clienteActivo.creditos[ci].plan[pi];
-  var historial=cuota.historialPagos||[];
-  var monto=cuota.monto||0;
-  var pagado=cuota.montoPagado||0;
-  var saldo=cuota.saldo||0;
-  var html='<div style="margin-bottom:14px;background:#f4f8fd;border-radius:8px;padding:12px;font-size:12px">';
-  html+='<div>Cuota original: <strong>$'+Math.round(monto).toLocaleString('es-AR')+'</strong></div>';
-  html+='<div style="margin-top:4px">Total pagado: <strong>$'+Math.round(pagado).toLocaleString('es-AR')+'</strong></div>';
-  if(saldo>0) html+='<div style="margin-top:4px;color:#854F0B">Saldo pendiente: <strong>$'+Math.round(saldo).toLocaleString('es-AR')+'</strong></div>';;
-  else html+='<div style="margin-top:4px;color:#27500A">&#10003; Cancelada</div>';
-  html+='</div>';
-  if(historial.length){
-    html+='<table class="tbl"><thead><tr><th>Fecha</th><th>Monto</th><th>Nota</th></tr></thead><tbody>';
-    historial.forEach(function(h){
-      html+='<tr><td>'+( h.fecha||'—')+'</td><td><strong>$'+Math.round(h.monto||0).toLocaleString('es-AR')+'</strong></td><td style="font-size:11px;color:#666">'+(h.nota||'—')+'</td></tr>';
-    });
-    html+='</tbody></table>';
-  } else if(cuota.fechaPago){
-    html+='<table class="tbl"><thead><tr><th>Fecha</th><th>Monto</th><th>Nota</th></tr></thead><tbody>';
-    html+='<tr><td>'+(cuota.fechaPago||'—')+'</td><td><strong>$'+Math.round(pagado).toLocaleString('es-AR')+'</strong></td><td style="font-size:11px;color:#666">'+(cuota.notaPago||'—')+'</td></tr>';
-    html+='</tbody></table>';
-  } else {
-    html+='<div style="color:#aaa;font-size:12px">Sin detalle de pagos registrado</div>';
-  }
-  document.getElementById('historial-pago-body').innerHTML=html;
-  document.getElementById('modalHistorialPago').classList.add('open');
-}
-
 function toggleCuota(ci,pi){
   var cuota=clienteActivo.creditos[ci].plan[pi];
   if(cuota.pagada){
-    if(!confirm('¿Deshacer el pago completo de esta cuota?')) return;
-    var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
-    var p=DB.clientes[idx].creditos[ci].plan[pi];
-    p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;p.historialPagos=[];
-    clienteActivo=DB.clientes[idx];
-    saveDB(clienteActivo);setTabAdmin('cuenta');
-  } else if(cuota.pagadaParcial){
-    // Tiene pago parcial - ofrecer agregar mas o deshacer
-    var saldo=cuota.saldo||0;
-    var pagado=cuota.montoPagado||0;
-    var opcion=confirm('Cuota con pago parcial\nPagado: $'+Math.round(pagado).toLocaleString('es-AR')+'\nSaldo pendiente: $'+Math.round(saldo).toLocaleString('es-AR')+'\n\nAceptar = Agregar otro pago\nCancelar = Deshacer todo');
-    if(opcion){
-      // Abrir modal para agregar pago
-      abrirModalPago(ci,pi);
-    } else {
-      if(!confirm('¿Deshacer todos los pagos de esta cuota?')) return;
-      var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
-      var p=DB.clientes[idx].creditos[ci].plan[pi];
-      p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;p.historialPagos=[];
-      clienteActivo=DB.clientes[idx];
-      saveDB(clienteActivo);setTabAdmin('cuenta');
-    }
-  } else {
-    abrirModalPago(ci,pi);
+    if(!confirm('\u00bfDeshacer el pago de esta cuota?')) return;
+    deshacerPagoCuota(ci,pi);
+    return;
   }
-}
-
-function abrirModalPago(ci,pi){
-  var cuota=clienteActivo.creditos[ci].plan[pi];
+  // Sin pagar, o "a cuenta" (pagadaParcial): abrir modal para cargar un pago,
+  // sea el primero o uno adicional que complete/reduzca el saldo pendiente.
   window._pagoCI=ci;window._pagoPI=pi;
-  var monto=cuota.monto||0;
-  var saldo=cuota.saldo||0;
-  var pagado=cuota.montoPagado||0;
-  document.getElementById('pago-monto').value=saldo>0?saldo:monto;
+  var pendiente = cuota.pagadaParcial ? (cuota.saldo!=null ? cuota.saldo : (cuota.monto||0)) : (cuota.monto||0);
+  window._pagoReferencia = pendiente;
+  document.getElementById('pago-monto').value=pendiente;
   document.getElementById('pago-fecha').value=new Date().toISOString().slice(0,10);
   document.getElementById('pago-nota').value='';
-  document.getElementById('pago-original').textContent='$'+Math.round(monto).toLocaleString('es-AR')+(pagado>0?' — pagado: $'+Math.round(pagado).toLocaleString('es-AR'):'');
-  document.getElementById('pago-diferencia').textContent=saldo>0?'Saldo pendiente: $'+Math.round(saldo).toLocaleString('es-AR'):'—';
-  document.getElementById('pago-diferencia').style.color=saldo>0?'#854F0B':'#555';
+  var lbl=document.getElementById('pago-original-label');
+  if(lbl) lbl.textContent = cuota.pagadaParcial ? 'Saldo pendiente:' : 'Cuota original:';
+  document.getElementById('pago-original').textContent='$'+Math.round(pendiente).toLocaleString('es-AR');
+  document.getElementById('pago-diferencia').textContent='\u2014';
+  document.getElementById('pago-diferencia').style.color='#555';
   document.getElementById('modalPago').classList.add('open');
 }
+function deshacerPagoCuota(ci,pi){
+  var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
+  var p=DB.clientes[idx].creditos[ci].plan[pi];
+  p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;p.pagosHistorial=null;
+  clienteActivo=DB.clientes[idx];
+  saveDB(clienteActivo);setTabAdmin('cuenta');
+}
 function calcDiferenciaPago(){
-  var cuota=clienteActivo.creditos[window._pagoCI].plan[window._pagoPI];
   var monto=parseFloat(document.getElementById('pago-monto').value)||0;
-  var original=cuota.monto||0;
-  var dif=monto-original;
+  var referencia=window._pagoReferencia||0;
+  var dif=monto-referencia;
   var el=document.getElementById('pago-diferencia');
-  if(Math.abs(dif)<1){ el.textContent='Pago exacto'; el.style.color='#27500A'; }
-  else if(dif<0){ el.textContent='A cuenta \u2014 saldo: $'+Math.round(Math.abs(dif)).toLocaleString('es-AR'); el.style.color='#854F0B'; }
+  if(Math.abs(dif)<1){ el.textContent='Pago exacto \u2014 completa el saldo'; el.style.color='#27500A'; }
+  else if(dif<0){ el.textContent='A cuenta \u2014 saldo restante: $'+Math.round(Math.abs(dif)).toLocaleString('es-AR'); el.style.color='#854F0B'; }
   else { el.textContent='Con recargo: +$'+Math.round(dif).toLocaleString('es-AR'); el.style.color='#1a4a8a'; }
 }
 function confirmarPago(){
   var monto=parseFloat(document.getElementById('pago-monto').value)||0;
   var fecha=document.getElementById('pago-fecha').value;
   var nota=document.getElementById('pago-nota').value.trim();
-  if(!monto){alert('Ingresá el monto');return;}
+  if(!monto){alert('Ingres\u00e1 el monto');return;}
   var ci=window._pagoCI;var pi=window._pagoPI;
   var idx=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
   var p=DB.clientes[idx].creditos[ci].plan[pi];
-  var original=p.monto||0;
-  // Acumular pagos parciales
-  var montoPrevio=p.montoPagado||0;
-  var totalPagado=montoPrevio+monto;
-  var dif=totalPagado-original;
-  // Registrar historial de pagos
-  if(!p.historialPagos) p.historialPagos=[];
-  p.historialPagos.push({monto:monto,fecha:fecha,nota:nota});
-  p.montoPagado=totalPagado;
-  p.fechaPago=fecha;
-  p.notaPago=nota;
-  if(dif>=0){
-    p.pagada=true;p.pagadaParcial=false;p.saldo=0;
-    if(dif>0) p.recargo=dif;
-  } else {
-    p.pagada=false;p.pagadaParcial=true;p.saldo=Math.abs(dif);
+
+  if(!p.pagosHistorial) p.pagosHistorial=[];
+  // Migrar un pago único guardado con el esquema viejo (sin historial) como primer registro
+  if(p.pagosHistorial.length===0 && p.montoPagado){
+    p.pagosHistorial.push({monto:p.montoPagado, fecha:p.fechaPago||fecha, nota:p.notaPago||''});
   }
+  p.pagosHistorial.push({monto:monto, fecha:fecha, nota:nota});
+
+  var acumulado=p.pagosHistorial.reduce(function(s,x){return s+(parseFloat(x.monto)||0);},0);
+  var original=p.monto||0;
+  var dif=acumulado-original;
+
+  p.montoPagado=acumulado; // total acumulado entre todos los pagos de esta cuota
+  p.fechaPago=fecha;       // fecha del último pago (compat con vistas existentes)
+  p.notaPago=nota;         // nota del último pago
+
+  if(Math.abs(dif)<1){ p.pagada=true;p.pagadaParcial=false;p.saldo=0;p.recargo=null; }
+  else if(dif<0){ p.pagada=false;p.pagadaParcial=true;p.saldo=Math.abs(dif);p.recargo=null; }
+  else { p.pagada=true;p.pagadaParcial=false;p.saldo=0;p.recargo=dif; }
+
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);cerrarModal('modalPago');setTabAdmin('cuenta');
+}
+
+// -- SUBDIARIO DE PAGOS --
+window._sdUltimosPagos = null; // última lista generada, para exportar a Excel
+
+async function abrirSubdiario(){
+  var hoy=new Date().toISOString().slice(0,10);
+  var hace30=new Date(Date.now()-30*24*60*60*1000).toISOString().slice(0,10);
+  document.getElementById('sd-desde').value=hace30;
+  document.getElementById('sd-hasta').value=hoy;
+  var selEnt=document.getElementById('sd-entidad');
+  var entidades=(window.DB.entidades||[]).slice().sort();
+  selEnt.innerHTML='<option value="">Todas</option>'+entidades.map(function(e){return '<option>'+e+'</option>';}).join('');
+  document.getElementById('sd-resultado').innerHTML='<div style="color:#aaa;font-size:12px;padding:10px 0">Cargando pagos…</div>';
+  document.getElementById('sd-resumen').style.display='none';
+  document.getElementById('sd-btn-excel').style.display='none';
+  document.getElementById('modalSubdiario').classList.add('open');
+  if(typeof window.obtenerTodosClientes==='function'){
+    await window.obtenerTodosClientes();
+  }
+  generarSubdiario();
+}
+
+function recolectarPagos(desde, hasta, entidadFiltro){
+  var universo=window._todosClientesCache||window.DB.clientes||[];
+  var pagos=[];
+  universo.forEach(function(cliente){
+    (cliente.creditos||[]).forEach(function(cr){
+      (cr.plan||[]).forEach(function(cuota){
+        var entidadCuota=cr.entidad||cliente.entidad||'—';
+        var historial=cuota.pagosHistorial;
+        // Compatibilidad: cuotas viejas sin historial pero con un pago único registrado
+        if((!historial||!historial.length) && cuota.montoPagado){
+          historial=[{monto:cuota.montoPagado, fecha:cuota.fechaPago, nota:cuota.notaPago}];
+        }
+        (historial||[]).forEach(function(pg){
+          if(!pg.fecha) return;
+          if(desde && pg.fecha<desde) return;
+          if(hasta && pg.fecha>hasta) return;
+          if(entidadFiltro && entidadCuota!==entidadFiltro) return;
+          pagos.push({
+            fecha:pg.fecha,
+            entidad:entidadCuota,
+            cartera:cr.cartera||'—',
+            cliente:cliente.nombre||'—',
+            dni:cliente.dni||'—',
+            credito:cr.num||'—',
+            monto:parseFloat(pg.monto)||0,
+            nota:pg.nota||''
+          });
+        });
+      });
+    });
+  });
+  pagos.sort(function(a,b){ return a.fecha<b.fecha?1:(a.fecha>b.fecha?-1:0); });
+  return pagos;
+}
+
+function generarSubdiario(){
+  var desde=document.getElementById('sd-desde').value;
+  var hasta=document.getElementById('sd-hasta').value;
+  var entidadFiltro=document.getElementById('sd-entidad').value;
+  var pagos=recolectarPagos(desde,hasta,entidadFiltro);
+  window._sdUltimosPagos=pagos;
+
+  var el=document.getElementById('sd-resultado');
+  var resumenEl=document.getElementById('sd-resumen');
+  var btnExcel=document.getElementById('sd-btn-excel');
+
+  if(!pagos.length){
+    el.innerHTML='<div style="color:#aaa;font-size:13px;padding:14px 0;text-align:center">No hay pagos registrados en ese rango.</div>';
+    resumenEl.style.display='none';
+    btnExcel.style.display='none';
+    return;
+  }
+
+  var total=pagos.reduce(function(s,p){return s+p.monto;},0);
+  var porEntidad={};
+  pagos.forEach(function(p){ porEntidad[p.entidad]=(porEntidad[p.entidad]||0)+p.monto; });
+  var resumenEntidades=Object.keys(porEntidad).sort().map(function(e){
+    return e+': $'+Math.round(porEntidad[e]).toLocaleString('es-AR');
+  }).join(' · ');
+
+  resumenEl.style.display='block';
+  resumenEl.innerHTML='Total: $'+Math.round(total).toLocaleString('es-AR')+' en '+pagos.length+' pago'+(pagos.length===1?'':'s')+
+    (Object.keys(porEntidad).length>1 ? '<div style="font-weight:400;font-size:11.5px;margin-top:4px;color:#3a6a1a">'+resumenEntidades+'</div>' : '');
+
+  var html='<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+  html+='<tr style="text-align:left;border-bottom:1px solid #ddd;color:#888;font-size:10.5px;text-transform:uppercase">'+
+    '<th style="padding:6px 4px">Fecha</th><th style="padding:6px 4px">Entidad</th><th style="padding:6px 4px">Cliente</th>'+
+    '<th style="padding:6px 4px">DNI</th><th style="padding:6px 4px">Crédito</th><th style="padding:6px 4px;text-align:right">Monto</th></tr>';
+  pagos.forEach(function(p){
+    var fFmt=new Date(p.fecha+'T00:00:00').toLocaleDateString('es-AR');
+    html+='<tr style="border-bottom:1px solid #f0f0ec">'+
+      '<td style="padding:6px 4px">'+fFmt+'</td>'+
+      '<td style="padding:6px 4px">'+p.entidad+'</td>'+
+      '<td style="padding:6px 4px">'+p.cliente+'</td>'+
+      '<td style="padding:6px 4px">'+p.dni+'</td>'+
+      '<td style="padding:6px 4px">'+p.credito+'</td>'+
+      '<td style="padding:6px 4px;text-align:right;font-weight:600">$'+Math.round(p.monto).toLocaleString('es-AR')+'</td>'+
+    '</tr>';
+  });
+  html+='</table>';
+  el.innerHTML=html;
+  btnExcel.style.display='inline-block';
+}
+
+function exportarSubdiarioExcel(){
+  var pagos=window._sdUltimosPagos||[];
+  if(!pagos.length || typeof XLSX==='undefined') return;
+  var filas=pagos.map(function(p){
+    return {
+      'Fecha': new Date(p.fecha+'T00:00:00').toLocaleDateString('es-AR'),
+      'Entidad': p.entidad,
+      'Cartera': p.cartera,
+      'Cliente': p.cliente,
+      'DNI': p.dni,
+      'Crédito': p.credito,
+      'Monto': p.monto,
+      'Nota': p.nota
+    };
+  });
+  var ws=XLSX.utils.json_to_sheet(filas);
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Subdiario');
+  var hoy=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,'subdiario_pagos_'+hoy+'.xlsx');
 }
 
 // -- TRÁMITES --
@@ -1755,7 +1890,6 @@ function renderConsultas(){
     <div class="tb active" onclick="setTabConsulta('contacto',this)">&#128222; Último contacto</div>
     
     <div class="tb" onclick="setTabConsulta('comercios',this)">&#127981; Comercios</div>
-    <div class="tb" onclick="setTabConsulta('subdiario',this)">&#128200; Subdiario de pagos</div>
   </div>
   <div class="tabcontent" id="consultaContent"></div>`;
   renderConsultaContacto();
@@ -1766,7 +1900,6 @@ function setTabConsulta(tab, el){
   if(bar) bar.querySelectorAll('.tb').forEach(function(t){t.classList.remove('active');});
   if(el) el.classList.add('active');
   if(tab==='contacto') renderConsultaContacto();
-  else if(tab==='subdiario') renderSubdiario();
   else renderComerciosConsulta();
 }
 function renderConsultaPromesas(){
@@ -1864,70 +1997,6 @@ function eliminarComercioConsulta(){
   cerrarModal('modalComercio');
   renderComerciosConsulta();
 }
-function renderSubdiario(){
-  var el=document.getElementById('consultaContent');
-  var hoy=new Date();
-  var mesActual=hoy.getFullYear()+'-'+(String(hoy.getMonth()+1).padStart(2,'0'));
-  el.innerHTML='<div class="card">'+
-    '<div class="card-hdr"><div class="card-title">&#128200; Subdiario de pagos</div></div>'+
-    '<div class="adv-filters">'+
-    '<div class="fld"><label>Mes</label><input type="month" id="sub-mes" value="'+mesActual+'" onchange="filtrarSubdiario()" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none"></div>'+
-    '<div class="fld"><label>Entidad</label><select id="sub-ent" onchange="filtrarSubdiario()" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;width:100%"><option value="">Todas</option>'+
-    (DB.entidades||[]).map(function(e){return '<option>'+e+'</option>';}).join('')+
-    '</select></div>'+
-    '</div>'+
-    '<div id="sub-resultado"></div></div>';
-  filtrarSubdiario();
-}
-
-function filtrarSubdiario(){
-  var mes=document.getElementById('sub-mes').value;
-  var ent=(document.getElementById('sub-ent')||{value:''}).value;
-  var pagos=[];
-  (DB.clientes||[]).forEach(function(c){
-    (c.creditos||[]).forEach(function(cr){
-      var entCr=cr.entidad||c.entidad||'';
-      if(ent&&entCr!==ent) return;
-      (cr.plan||[]).forEach(function(p,pi){
-        // Revisar historial de pagos
-        var hist=p.historialPagos||[];
-        if(hist.length){
-          hist.forEach(function(h){
-            if(h.fecha&&h.fecha.slice(0,7)===mes){
-              pagos.push({nombre:c.nombre,dni:c.dni,entidad:entCr,cartera:cr.cartera||c.cartera||'',credito:cr.num||'',fecha:h.fecha,monto:h.monto||0,nota:h.nota||'',id:c.id});
-            }
-          });
-        } else if((p.pagada||p.pagadaParcial)&&p.fechaPago&&p.fechaPago.slice(0,7)===mes){
-          pagos.push({nombre:c.nombre,dni:c.dni,entidad:entCr,cartera:cr.cartera||c.cartera||'',credito:cr.num||'',fecha:p.fechaPago,monto:p.montoPagado||0,nota:p.notaPago||'',id:c.id});
-        }
-      });
-    });
-  });
-  pagos.sort(function(a,b){ return a.fecha>b.fecha?1:-1; });
-  var total=pagos.reduce(function(s,p){return s+p.monto;},0);
-  var el=document.getElementById('sub-resultado');
-  if(!pagos.length){
-    el.innerHTML='<div style="color:#aaa;font-size:13px;padding:10px">Sin pagos registrados para ese período.</div>';
-    return;
-  }
-  el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'+
-    '<span style="font-size:12px;color:#555">'+pagos.length+' pagos registrados</span>'+
-    '<span style="font-size:14px;font-weight:600;color:#27500A">Total: $'+Math.round(total).toLocaleString('es-AR')+'</span>'+
-    '</div>'+
-    '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Fecha</th><th>Nombre</th><th>DNI</th><th>Entidad</th><th>Crédito</th><th>Monto</th><th>Nota</th></tr></thead><tbody>'+
-    pagos.map(function(p){
-      return '<tr onclick="selCliente(''+p.id+'');setMod('admin',document.querySelectorAll('.mb')[0]);setTabAdmin('cuenta')" style="cursor:pointer">'+
-        '<td>'+p.fecha+'</td>'+
-        '<td>'+p.nombre+'</td>'+
-        '<td>'+p.dni+'</td>'+
-        '<td>'+p.entidad+'</td>'+
-        '<td>'+p.credito+'</td>'+
-        '<td style="font-weight:600;color:#27500A">$'+Math.round(p.monto).toLocaleString('es-AR')+'</td>'+
-        '<td style="font-size:11px;color:#666">'+p.nota+'</td>'+
-      '</tr>';
-    }).join('')+'</tbody></table></div>';
-}
-
 function filtrarPromesas(){
   const ent=document.getElementById('cp-ent').value;
   const car=document.getElementById('cp-car').value;
@@ -2706,62 +2775,65 @@ function renderLimpiarDuplicados(){
 async function ejecutarLimpiezaDuplicados(){
   if(!confirm('Eliminar duplicados y fusionar créditos. ¿Confirmás?')) return;
   const el=document.getElementById('herrContent');
-  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:16px">&#128190; Procesando...</div></div>';
-  
-  // Agrupar por DNI
+
   const dniMap={};
   DB.clientes.forEach(function(c){
     const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni){ return; }
+    if(!dni) return;
     if(!dniMap[dni]) dniMap[dni]=[];
     dniMap[dni].push(c);
   });
 
   const aEliminar=[];
   const aModificar=[];
-
   Object.values(dniMap).forEach(function(arr){
     if(arr.length<=1) return;
-    // Ordenar: el que tiene mas datos primero
-    arr.sort(function(a,b){ return (JSON.stringify(b).length)-(JSON.stringify(a).length); });
+    arr.sort(function(a,b){ return JSON.stringify(b).length-JSON.stringify(a).length; });
     const principal=arr[0];
-    // Fusionar creditos unicos de los duplicados
     arr.slice(1).forEach(function(dup){
       (dup.creditos||[]).forEach(function(cr){
-        const yaExiste=(principal.creditos||[]).some(function(e){
-          return e.num&&cr.num&&e.num===cr.num;
-        });
+        const yaExiste=(principal.creditos||[]).some(function(e){ return e.num&&cr.num&&e.num===cr.num; });
         if(!yaExiste){ if(!principal.creditos) principal.creditos=[]; principal.creditos.push(cr); }
       });
-      // Fusionar telefonos
       (dup.telefonos||[]).forEach(function(t){ if(t&&!(principal.telefonos||[]).includes(t)){ if(!principal.telefonos) principal.telefonos=[]; principal.telefonos.push(t); } });
-      // Marcar para eliminar
       aEliminar.push(dup.id);
     });
     aModificar.push(principal);
   });
 
-  // Eliminar duplicados de DB local
   DB.clientes=DB.clientes.filter(function(c){ return !aEliminar.includes(c.id); });
-  
-  // Guardar modificados en Firebase
+
+  const total=aEliminar.length+aModificar.length;
+  let procesados=0;
+
+  function prog(txt){
+    procesados++;
+    const pct=Math.round(procesados/total*100);
+    el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px 16px">'+txt+' ('+procesados+'/'+total+')</div>'+
+      '<div style="background:#dce8f5;border-radius:4px;height:10px;margin:0 16px 16px"><div style="background:#2557a7;border-radius:4px;height:10px;width:'+pct+'%"></div></div></div>';
+  }
+
+  // Guardar modificados de a uno con pausa cada 10
   for(var i=0;i<aModificar.length;i++){
     await window.saveDB(aModificar[i]);
-  }
-  // Eliminar duplicados en Firebase
-  if(typeof window.deleteClienteDB === 'function'){
-    for(var i=0;i<aEliminar.length;i++){
-      await window.deleteClienteDB(aEliminar[i]);
-    }
+    prog('Actualizando clientes');
+    if(i%10===9) await new Promise(function(r){setTimeout(r,100);});
   }
 
+  // Eliminar duplicados de a uno con pausa cada 50
+  for(var i=0;i<aEliminar.length;i++){
+    if(typeof window.deleteClienteDB==='function') await window.deleteClienteDB(aEliminar[i]);
+    prog('Eliminando duplicados');
+    if(i%50===49) await new Promise(function(r){setTimeout(r,200);});
+  }
+
+  try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados,clientes:DB.clientes})); }catch(e){}
   renderLista();
-  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">'+
-    '<strong>&#10003; Limpieza completada</strong><br>'+
-    aEliminar.length+' registros duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
+  el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A">'+
+    '<strong>✓ Limpieza completada</strong><br>'+aEliminar.length+' duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
     '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
 }
-
+  
 function renderMantenimiento(){
   const el=document.getElementById('herrContent');
   const reglas=[
@@ -2879,11 +2951,35 @@ function ejecutarRenombradoCarteras(){
 document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
 </script>
 
+<div class="modal-overlay" id="modalSubdiario">
+<div class="modal" style="max-width:760px;width:94%">
+  <h3>📒 Subdiario de pagos</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:14px">
+    <div class="fld"><label>Desde</label>
+      <input type="date" id="sd-desde" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">
+    </div>
+    <div class="fld"><label>Hasta</label>
+      <input type="date" id="sd-hasta" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">
+    </div>
+    <div class="fld"><label>Entidad</label>
+      <select id="sd-entidad" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none"><option value="">Todas</option></select>
+    </div>
+    <button class="btn btn-dark btn-sm" onclick="generarSubdiario()" style="height:34px">Generar</button>
+  </div>
+  <div id="sd-resumen" style="display:none;background:#EAF3DE;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#27500A;font-weight:600"></div>
+  <div id="sd-resultado" style="max-height:52vh;overflow-y:auto"></div>
+  <div style="display:flex;gap:8px;margin-top:14px">
+    <button class="btn btn-outline btn-sm" id="sd-btn-excel" style="display:none" onclick="exportarSubdiarioExcel()">📊 Exportar a Excel</button>
+    <button class="btn btn-outline btn-sm" onclick="cerrarModal('modalSubdiario')" style="margin-left:auto">Cerrar</button>
+  </div>
+</div>
+</div>
+
 <div class="modal-overlay" id="modalPago">
 <div class="modal">
   <h3>Registrar Pago</h3>
   <div style="background:#f4f8fd;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px">
-    <div>Cuota original: <strong id="pago-original">—</strong></div>
+    <div><span id="pago-original-label">Cuota original:</span> <strong id="pago-original">—</strong></div>
     <div style="margin-top:5px">Diferencia: <strong id="pago-diferencia">—</strong></div>
   </div>
   <div style="display:grid;gap:10px;margin-bottom:14px">
@@ -2900,16 +2996,6 @@ document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListe
   <div class="btn-row">
     <button class="btn btn-dark" onclick="confirmarPago()">Confirmar pago</button>
     <button class="btn btn-outline" onclick="cerrarModal('modalPago')">Cancelar</button>
-  </div>
-</div>
-</div>
-
-<div class="modal-overlay" id="modalHistorialPago">
-<div class="modal">
-  <h3>&#128196; Historial de pagos</h3>
-  <div id="historial-pago-body"></div>
-  <div class="btn-row" style="margin-top:14px">
-    <button class="btn btn-outline" onclick="cerrarModal('modalHistorialPago')">Cerrar</button>
   </div>
 </div>
 </div>
