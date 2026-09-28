@@ -1494,7 +1494,7 @@ function verHistorialPago(ci,pi){
   var html='<div style="margin-bottom:14px;background:#f4f8fd;border-radius:8px;padding:12px;font-size:12px">';
   html+='<div>Cuota original: <strong>$'+Math.round(monto).toLocaleString('es-AR')+'</strong></div>';
   html+='<div style="margin-top:4px">Total pagado: <strong>$'+Math.round(pagado).toLocaleString('es-AR')+'</strong></div>';
-  if(saldo>0) html+='<div style="margin-top:4px;color:#854F0B">Saldo pendiente: <strong>$'+Math.round(saldo).toLocaleString('es-AR')+'</strong></div>';
+  if(saldo>0) html+='<div style="margin-top:4px;color:#854F0B">Saldo pendiente: <strong>$'+Math.round(saldo).toLocaleString('es-AR')+'</strong></div>';;
   else html+='<div style="margin-top:4px;color:#27500A">&#10003; Cancelada</div>';
   html+='</div>';
   if(historial.length){
