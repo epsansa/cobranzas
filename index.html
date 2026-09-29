@@ -716,7 +716,7 @@ function renderLista(){
     const sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
     const tieneObs=c.obs && c.obs.trim();
     const obsFechaFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : '';
-    const obsResumen = tieneObs ? (c.obs.length>60 ? c.obs.slice(0,60)+'…' : c.obs) : '';
+    const obsResumen = tieneObs ? (c.obs.length>10 ? c.obs.slice(0,10)+'…' : c.obs) : '';
     return `<div class="ci ${clienteActivo&&clienteActivo.id===c.id?'sel':''}" onclick="selCliente('${c.id}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div class="cn">${c.nombre||'Sin nombre'}</div>
@@ -2095,6 +2095,14 @@ function setTabHerr(tab,el){
   else if(tab==='backup') renderBackupTab();
   else if(tab==='importtel') renderImportarTelTramites();
   else if(tab==='duplicados') renderLimpiarDuplicados();
+  else if(tab==='mantenimiento'){
+    if(!window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
+      document.getElementById('herrContent').innerHTML='<div style="color:#aaa;font-size:12px;padding:16px">Cargando clientes\u2026</div>';
+      window.obtenerTodosClientes().then(renderMantenimiento);
+    } else {
+      renderMantenimiento();
+    }
+  }
   else renderMantenimiento();
 }
 
@@ -2878,6 +2886,8 @@ function renderMantenimiento(){
       }
     });
   });
+  const universoObs=window._todosClientesCache||DB.clientes;
+  const sinFecha=universoObs.filter(function(c){ return c.obs && c.obs.trim() && !c.obsFecha; });
   el.innerHTML=
     '<div class="card">'+
       '<div class="card-hdr"><div class="card-title">&#9881; Mantenimiento de carteras</div>'+
@@ -2888,6 +2898,15 @@ function renderMantenimiento(){
         '<div style="overflow-x:auto;margin-bottom:12px"><table class="tbl"><thead><tr><th>Nombre actual</th><th></th><th>Nombre nuevo</th></tr></thead><tbody>'+preview+'</tbody></table></div>'
         :'<div style="color:#aaa;font-size:12px;margin-bottom:12px">No se detectaron carteras para renombrar.</div>')+
       '<button class="btn btn-outline" onclick="renderMantenimiento()">&#8635; Actualizar preview</button>'+
+    '</div>'+
+    '<div class="card">'+
+      '<div class="card-hdr"><div class="card-title">&#128197; Fechas de observaciones faltantes</div>'+
+        (sinFecha.length?'<button class="btn btn-dark btn-sm" onclick="ejecutarCompletarFechasObs()">&#10003; Completar con la fecha de hoy</button>':'')+
+      '</div>'+
+      '<p style="font-size:12px;color:#555;margin-bottom:10px">Observaciones cargadas antes de que el sistema empezara a registrar la fecha de guardado. No se puede recuperar la fecha real en que se escribieron — esto les asigna la fecha de hoy como referencia, para que dejen de figurar vacías.</p>'+
+      (sinFecha.length?
+        '<div style="color:#854F0B;font-size:12px;margin-bottom:4px"><strong>'+sinFecha.length+'</strong> cliente/s con observación sin fecha registrada.</div>'
+        :'<div style="color:#27500A;font-size:12px">&#10003; Todas las observaciones tienen fecha registrada.</div>')+
     '</div>';
 }
 
@@ -2954,6 +2973,42 @@ function ejecutarRenombradoCarteras(){
     }
   }
   doSaveRename(5);
+}
+
+function ejecutarCompletarFechasObs(){
+  const universoObs=window._todosClientesCache||DB.clientes;
+  const sinFecha=universoObs.filter(function(c){ return c.obs && c.obs.trim() && !c.obsFecha; });
+  if(!sinFecha.length) return;
+  if(!confirm('Se les va a asignar la fecha de hoy a '+sinFecha.length+' observaci\u00f3n/es que no ten\u00edan fecha guardada.\nNo es la fecha original (no se puede recuperar), solo para que dejen de figurar vac\u00edas.\n\u00bfContinuar?')) return;
+  const hoy=new Date().toISOString().slice(0,10);
+  const el=document.getElementById('herrContent');
+  sinFecha.forEach(function(c){
+    c.obsFecha=hoy;
+    const idx=DB.clientes.findIndex(function(x){return x.id===c.id;});
+    if(idx>=0) DB.clientes[idx].obsFecha=hoy;
+    window._actualizarClienteEnCache(c);
+  });
+  el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px" data-progreso>&#128190; Guardando 0 de '+sinFecha.length+' clientes...</div>';
+  function doSaveFechas(intentos){
+    if(typeof window.saveMuchos==='function'){
+      window.saveMuchos(sinFecha,false).then(function(){
+        renderLista();
+        el.innerHTML=
+          '<div class="card" style="border-left:4px solid #27500A">'+
+            '<div class="card-title" style="color:#27500A;margin-bottom:8px">&#10003; Completado y guardado en la nube</div>'+
+            '<p style="font-size:13px;color:#555"><strong>'+sinFecha.length+'</strong> observaci\u00f3n/es actualizadas con la fecha de hoy.</p>'+
+            '<button class="btn btn-outline" style="margin-top:12px" onclick="renderMantenimiento()">Ver estado</button>'+
+          '</div>';
+      });
+    } else if(intentos>0){
+      el.innerHTML='<div style="color:#2557a7;font-size:12px;padding:16px">&#9203; Esperando Firebase... ('+intentos+')</div>';
+      setTimeout(function(){doSaveFechas(intentos-1);},1000);
+    } else {
+      saveDB(); renderLista();
+      el.innerHTML='<div style="color:#e09020;padding:16px">&#9888; Aplicado localmente. Recarg\u00e1 para sincronizar.</div>';
+    }
+  }
+  doSaveFechas(5);
 }
 
 // Cerrar modales
