@@ -698,6 +698,9 @@ function renderLista(){
   el.innerHTML=fil.map(c=>{
     const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
     const sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
+    const tieneObs=c.obs && c.obs.trim();
+    const obsFechaFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : '';
+    const obsResumen = tieneObs ? (c.obs.length>60 ? c.obs.slice(0,60)+'…' : c.obs) : '';
     return `<div class="ci ${clienteActivo&&clienteActivo.id===c.id?'sel':''}" onclick="selCliente('${c.id}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div class="cn">${c.nombre||'Sin nombre'}</div>
@@ -705,6 +708,7 @@ function renderLista(){
       </div>
       <div class="cs">DNI ${c.dni||'—'}</div>
       ${ult?`<div class="ct">📋 ${ult.tipo} · ${ult.fecha}</div>`:''}
+      ${tieneObs?`<div class="ct" style="color:#8a5a00;background:#FFF6E5;border-radius:5px;padding:3px 6px;margin-top:3px">📝 ${obsResumen}${obsFechaFmt?` <span style="opacity:.75">(${obsFechaFmt})</span>`:''}</div>`:''}
     </div>`;
   }).join('');
 }
@@ -880,14 +884,18 @@ function aplicarAvanzada(){
     <span style="font-size:12px;font-weight:600;color:#2557a7">${fil.length} cliente/s encontrado/s</span>
     <button class="btn btn-green btn-sm" onclick="exportarResultadoAvanzada()">&#128229; Exportar Excel</button>
   </div>
-  <table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th></tr></thead><tbody>`+
-    fil.map(c=>`<tr onclick="selCliente('${c.id}');setTabAdmin('datos')">
+  <table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th><th>Observaciones</th></tr></thead><tbody>`+
+    fil.map(c=>{
+      const obsFechaFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : '';
+      const obsResumen = (c.obs&&c.obs.trim()) ? (c.obs.length>40?c.obs.slice(0,40)+'…':c.obs) : '—';
+      return `<tr onclick="selCliente('${c.id}');setTabAdmin('datos')">
       <td>${c.nombre||'—'}</td><td>${c.dni||'—'}</td>
       <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado||'—'}</span></td>
       <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'—'}</td>
       <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'—'}</td>
       <td>${(c.creditos||[]).length}</td>
-    </tr>`).join('')+'</tbody></table>';
+      <td style="font-size:11.5px">${obsResumen}${obsFechaFmt?` <span style="color:#aaa">(${obsFechaFmt})</span>`:''}</td>
+    </tr>`;}).join('')+'</tbody></table>';
 }
 
 // -- TAB DATOS --
@@ -1269,9 +1277,13 @@ function ejecutarBusqueda(){
 // -- TAB OBS --
 function renderObs(){
   const c=clienteActivo;
+  const fFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : null;
   return `
   <div class="card">
-    <div class="card-title" style="margin-bottom:10px">Observaciones</div>
+    <div class="card-hdr" style="margin-bottom:10px">
+      <div class="card-title">Observaciones</div>
+      ${fFmt?`<span style="font-size:11px;color:#888">Guardado el ${fFmt}</span>`:''}
+    </div>
     <textarea id="obs-txt" style="width:100%;min-height:140px;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none;font-family:Arial;resize:vertical">${c.obs||''}</textarea>
     <div class="btn-row">
       <button class="btn btn-dark" onclick="guardarObs()">Guardar</button>
@@ -1283,6 +1295,7 @@ function guardarObs(){
   const txt=document.getElementById('obs-txt').value;
   const idx=DB.clientes.findIndex(c=>c.id===clienteActivo.id);
   DB.clientes[idx].obs=txt;
+  DB.clientes[idx].obsFecha = txt.trim() ? new Date().toISOString().slice(0,10) : null;
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);
   const btn=event.target;
@@ -2258,7 +2271,8 @@ function exportarResultadoAvanzada(){
   const ent=document.getElementById('adv-ent')?document.getElementById('adv-ent').value:'';
   const car=document.getElementById('adv-car')?document.getElementById('adv-car').value:'';
   const est=document.getElementById('adv-est')?document.getElementById('adv-est').value:'';
-  const fil=DB.clientes.filter(function(c){
+  const universo=window._todosClientesCache||DB.clientes;
+  const fil=universo.filter(function(c){
     const enEnt=!ent||(c.creditos||[]).some(function(x){return x.entidad===ent;})||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(function(x){return x.cartera===car;})||c.cartera===car;
     return enEnt&&enCar&&(!est||c.estado===est);
@@ -2369,7 +2383,7 @@ function exportarExcelClientes(clientes,filename){
         Estado:v(c.estado),Producto:v(cr.producto),Comercio:v(cr.comercio),
         Credito:v(cr.num),FechaMora:v(cr.fecha),Capital:v(cr.capital),
         UltimoTramite:v(ult?ult.nota:''),FechaUltimoTramite:v(ult?ult.fechaHora:''),
-        Observaciones:v(c.obs)
+        Observaciones:v(c.obs),FechaObservacion:v(c.obsFecha)
       });
     });
   });
@@ -2387,7 +2401,7 @@ function exportarExcelClientes(clientes,filename){
   }catch(e){alert('Error al exportar: '+e.message);}
 }
 
-function exportarExcel(){ exportarExcelClientes(DB.clientes,'clientes'); }
+function exportarExcel(){ exportarExcelClientes(window._todosClientesCache||DB.clientes,'clientes'); }
 
 // ===================================================
 // BACKUP Y RESTAURAR
@@ -2431,28 +2445,7 @@ function restaurarBackup(e){
   reader.readAsText(file);
 }
 
-function exportarExcel(){
-  const rows=[];
-  DB.clientes.forEach(c=>{
-    const creds=c.creditos&&c.creditos.length?c.creditos:[{}];
-    creds.forEach(cr=>{
-      rows.push({
-        Nombre:c.nombre,DNI:c.dni,Domicilio:c.domicilio,Localidad:c.localidad,CP:c.cp,
-        Telefono:(c.telefonos||[]).join(' / '),Mail:(c.mails||[]).join(' / '),
-        Entidad:cr.entidad||c.entidad,Cartera:cr.cartera||c.cartera,
-        Estado:c.estado,Producto:cr.producto,Comercio:cr.comercio,
-        Credito:cr.num,FechaMora:cr.fecha,Capital:cr.capital,
-        UltimoTramite:c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1].nota:'',
-        FechaUltimoTramite:c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1].fechaHora:'',
-        Observaciones:c.obs
-      });
-    });
-  });
-  const ws=XLSX.utils.json_to_sheet(rows);
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'Clientes');
-  XLSX.writeFile(wb,'clientes_epsan.xlsx');
-}
+
 
 // ===================================================
 // UTILS
