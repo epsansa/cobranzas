@@ -92,6 +92,20 @@ function mostrarError(msg){ const el=document.getElementById('fb-status'); if(el
 
 // -- SAVE --
 let _saveTimer=null;
+
+// Actualiza (o agrega) UN cliente dentro de la caché en memoria, sin tirar el resto.
+// Así, después de guardar, la próxima búsqueda sigue siendo instantánea.
+window._actualizarClienteEnCache=function(cliente){
+  if(!window._todosClientesCache || !cliente || !cliente.id) return;
+  const i=window._todosClientesCache.findIndex(function(c){return c.id===cliente.id;});
+  if(i>=0) window._todosClientesCache[i]=cliente;
+  else window._todosClientesCache.push(cliente);
+};
+window._eliminarClienteDeCache=function(id){
+  if(!window._todosClientesCache) return;
+  window._todosClientesCache=window._todosClientesCache.filter(function(c){return c.id!==id;});
+};
+
 window.saveDB=function(clienteModificado){
   try {
     localStorage.setItem('epsan_v3',JSON.stringify(window.DB));
@@ -99,7 +113,7 @@ window.saveDB=function(clienteModificado){
     const bkKey='epsan_bk_'+hoy;
     if(!localStorage.getItem(bkKey)){ localStorage.setItem(bkKey,JSON.stringify(window.DB)); const bkKeys=Object.keys(localStorage).filter(k=>k.startsWith('epsan_bk_')).sort(); while(bkKeys.length>3) localStorage.removeItem(bkKeys.shift()); }
   } catch(e){}
-  if(clienteModificado) window._todosClientesCache = null; // se modificó un cliente: invalidar caché
+  if(clienteModificado) window._actualizarClienteEnCache(clienteModificado); // actualizar solo este cliente, sin tirar la caché entera
   window._fbSaving=true; actualizarIndicador('guardando');
   clearTimeout(_saveTimer);
   _saveTimer=setTimeout(async function(){
@@ -118,7 +132,7 @@ window.saveDBConfig=function(){ window.saveDB(null); };
 
 window.deleteClienteDB=async function(id){
   window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
-  window._todosClientesCache = null; // invalidar caché: un cliente fue eliminado
+  window._eliminarClienteDeCache(id); // sacar solo este cliente de la caché, sin tirar el resto
   try{ await deleteDoc(doc(db_fs,'clientes',id)); }catch(e){}
   try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
 };
@@ -144,7 +158,9 @@ window.importarMasivo=async function(clientes,reemplazar){
     }
     await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
-    window._todosClientesCache = null; // invalidar caché: se importaron/reemplazaron clientes
+    // Actualizar la caché con lo que ya sabemos, en vez de tirarla entera (evita un refetch innecesario)
+    if(reemplazar){ window._todosClientesCache = clientes.slice(); }
+    else if(window._todosClientesCache){ window._todosClientesCache = window._todosClientesCache.concat(clientes); }
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
     return true;
   } catch(e){ console.error('Error importarMasivo:',e); mostrarError('Error: '+e.message); window._fbSaving=false; actualizarIndicador('error'); return false; }
@@ -293,7 +309,7 @@ window.saveMuchos = async function(clientes, config){
       });
     }
     try{localStorage.setItem("epsan_v3",JSON.stringify(window.DB));}catch(e){}
-    window._todosClientesCache = null; // invalidar caché: se guardaron clientes en lote
+    clientes.forEach(function(c){ window._actualizarClienteEnCache(c); }); // actualizar puntual, sin tirar la caché
     window._fbLastSave=new Date();
     window._fbSaving=false;
     actualizarIndicador("ok");
