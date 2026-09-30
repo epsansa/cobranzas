@@ -251,6 +251,11 @@ async function cargarDatos(){
       if(window.clienteActivo) renderFicha(); else renderWelcome();
     };
 
+    // Precargar todos los clientes en SEGUNDO PLANO apenas termina el login,
+    // sin bloquear la pantalla. Así, cuando el usuario hace la primera búsqueda,
+    // lo más probable es que la caché ya esté lista (o casi) y no tenga que esperar.
+    window.obtenerTodosClientes().catch(function(e){ console.error('Precarga en segundo plano falló:',e); });
+
   } catch(e){
     console.error('Error Firebase:',e);
     window._fbConnected=false;
