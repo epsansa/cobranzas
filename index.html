@@ -678,8 +678,9 @@ function renderLista(){
     estados.map(e=>'<option'+(e===fEstActual?' selected':'')+'>'+e+'</option>').join('');
   const fEnt=document.getElementById('fEnt').value;
   if(fEnt){
+    const universoSidebar=window._todosClientesCache||DB.clientes;
     const carterasEnt=new Set();
-    DB.clientes.forEach(function(c){
+    universoSidebar.forEach(function(c){
       (c.creditos||[]).forEach(function(cr){
         if((cr.entidad||c.entidad||'')===fEnt && cr.cartera) carterasEnt.add(cr.cartera);
       });
@@ -874,8 +875,9 @@ function filtrarCarterasPorEntidad(){
     selCar.innerHTML='<option value="">Todas</option>'+DB.carteras.map(function(x){return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>';}).join('');
     return;
   }
+  const universo=window._todosClientesCache||DB.clientes;
   const carterasDeEntidad=new Set();
-  DB.clientes.forEach(function(c){
+  universo.forEach(function(c){
     (c.creditos||[]).forEach(function(cr){
       if((cr.entidad||c.entidad||'')===ent && cr.cartera) carterasDeEntidad.add(cr.cartera);
     });
