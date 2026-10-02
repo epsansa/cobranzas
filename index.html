@@ -85,7 +85,13 @@ function actualizarIndicador(estado, extra){
   if(estado==='conectando') el.innerHTML='<span style="color:#f5c97a">&#9203; Conectando...</span>';
   else if(estado==='error') el.innerHTML='<span style="color:#ff8888">&#9888; Sin nube</span>';
   else if(estado==='guardando') el.innerHTML='<span style="color:#7ab8f5">&#128190; Guardando'+(extra?' '+extra:'')+'...</span>';
-  else { const h=window._fbLastSave?window._fbLastSave.toTimeString().slice(0,5):''; el.innerHTML='<span style="color:#90ee90">&#9729; Conectado'+(h?' &middot; '+h:'')+'</span>'; }
+  else {
+    const h=window._fbLastSave?window._fbLastSave.toTimeString().slice(0,5):'';
+    const pct = window._baseCargada
+      ? ' <span style="opacity:.8">&middot; 100%</span>'
+      : ' <span style="opacity:.55">&middot; cargando base&hellip;</span>';
+    el.innerHTML='<span style="color:#90ee90">&#9729; Conectado'+(h?' &middot; '+h:'')+'</span>'+pct;
+  }
   window._fbActualizarIndicador=actualizarIndicador;
 }
 function mostrarError(msg){ const el=document.getElementById('fb-status'); if(el) el.innerHTML='<span style="color:#ff8888" title="'+msg+'">&#9888; Error</span>'; }
@@ -196,6 +202,7 @@ async function cargarDatos(){
 
     window.DB.clientes=[];
     window._clientesCompletos = false;
+    window._baseCargada = false; // se pone en true cuando termina de traer todos los clientes
     if(!window.DB.comercios) window.DB.comercios=[];
 
     window._fbConnected=true;
@@ -245,6 +252,7 @@ async function cargarDatos(){
       const arr = await window.obtenerTodosClientes(true);
       window.DB.clientes = arr;
       window._clientesCompletos = true; // DB.clientes tiene el universo completo, no un resultado de búsqueda parcial
+      window._baseCargada = true;
       try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
       actualizarIndicador('ok');
       renderLista();
@@ -254,7 +262,10 @@ async function cargarDatos(){
     // Precargar todos los clientes en SEGUNDO PLANO apenas termina el login,
     // sin bloquear la pantalla. Así, cuando el usuario hace la primera búsqueda,
     // lo más probable es que la caché ya esté lista (o casi) y no tenga que esperar.
-    window.obtenerTodosClientes().catch(function(e){ console.error('Precarga en segundo plano falló:',e); });
+    window.obtenerTodosClientes().then(function(){
+      window._baseCargada = true;
+      actualizarIndicador('ok'); // refresca el indicador para mostrar el 100%
+    }).catch(function(e){ console.error('Precarga en segundo plano falló:',e); });
 
   } catch(e){
     console.error('Error Firebase:',e);
@@ -752,6 +763,7 @@ function buscarLista(){
 async function buscarEnFirebase(q){
   try {
     var todos=await window.obtenerTodosClientes();
+    if(!window._baseCargada){ window._baseCargada=true; if(typeof window._fbActualizarIndicador==='function') window._fbActualizarIndicador('ok'); }
     var qNorm=q.toLowerCase().replace(/\./g,'');
     window.DB.clientes=todos.filter(function(c){
       try{
