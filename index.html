@@ -15,7 +15,7 @@
 <script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp, query, orderBy, limit, startAfter } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -228,6 +228,24 @@ async function cargarDatos(){
     // 4. Traer TODOS los clientes, con caché: si ya se cargaron antes (o hay una
     // carga en curso), reutiliza eso en vez de volver a pegarle a Firestore.
     // Solo "forzar=true" (botón Sincronizar) vuelve a descargar desde cero.
+    // Trae UN lote (hasta 'tam' documentos) a partir de 'cursor', reintentando
+    // hasta 3 veces si falla (timeout, conexión lenta, etc.) antes de abortar.
+    async function traerLoteConReintento(cursor, tam){
+      let intentos=0;
+      while(true){
+        try{
+          const base = cursor
+            ? query(CLIENTES_COL, orderBy('__name__'), startAfter(cursor), limit(tam))
+            : query(CLIENTES_COL, orderBy('__name__'), limit(tam));
+          return await getDocs(base);
+        }catch(e){
+          intentos++;
+          if(intentos>=3) throw e;
+          await new Promise(function(r){ setTimeout(r, 1200*intentos); }); // espera creciente antes de reintentar
+        }
+      }
+    }
+
     window.obtenerTodosClientes = async function(forzar){
       if(!forzar && window._todosClientesCache){
         return window._todosClientesCache;
@@ -236,13 +254,22 @@ async function cargarDatos(){
         return window._cargandoClientesPromesa;
       }
       window._cargandoClientesPromesa = (async function(){
-        const snap = await getDocs(CLIENTES_COL);
-        const arr = [];
-        snap.forEach(function(d){ try{ arr.push(JSON.parse(d.data().data)); }catch(e){} });
+        const TAM_LOTE=300; // lotes chicos: menos chance de timeout que traer todo de un saque
+        const arr=[];
+        let cursor=null;
+        while(true){
+          const snap = await traerLoteConReintento(cursor, TAM_LOTE);
+          if(snap.empty) break;
+          snap.forEach(function(d){ try{ arr.push(JSON.parse(d.data().data)); }catch(e){} });
+          window._todosClientesCache = arr.slice(); // disponible parcialmente mientras sigue trayendo el resto
+          if(typeof window._fbActualizarIndicador==='function') window._fbActualizarIndicador('ok');
+          if(snap.docs.length < TAM_LOTE) break; // último lote, no hay más
+          cursor = snap.docs[snap.docs.length-1];
+        }
         window._todosClientesCache = arr;
         window._cargandoClientesPromesa = null;
         return arr;
-      })();
+      })().catch(function(e){ window._cargandoClientesPromesa = null; throw e; });
       return window._cargandoClientesPromesa;
     };
 
