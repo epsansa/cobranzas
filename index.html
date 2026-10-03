@@ -416,6 +416,7 @@ a{color:inherit;text-decoration:none}
 .ci{padding:9px 11px;border-bottom:1px solid #eef3f8;cursor:pointer;transition:background .1s}
 .ci:hover{background:#f0f6fc}
 .ci.sel{background:#dceeff;border-left:3px solid #2557a7}
+.adv-row-sel td{background:#dceeff!important;font-weight:600}
 .ci .cn{font-weight:600;font-size:12px}
 .ci .cs{font-size:10px;color:#6a8aaa;margin-top:1px}
 .ci .ct{font-size:10px;color:#4a6a8a;margin-top:2px;background:#e8f2fc;padding:2px 5px;border-radius:3px}
@@ -977,7 +978,8 @@ function aplicarAvanzada(){
     fil.map(c=>{
       const obsFechaFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : '';
       const obsResumen = (c.obs&&c.obs.trim()) ? (c.obs.length>40?c.obs.slice(0,40)+'…':c.obs) : '—';
-      return `<tr onclick="abrirClienteDesdeAvanzada('${c.id}')">
+      const esActivo = clienteActivo && clienteActivo.id===c.id;
+      return `<tr onclick="abrirClienteDesdeAvanzada('${c.id}')" class="${esActivo?'adv-row-sel':''}">
       <td>${c.nombre||'—'}</td><td>${c.dni||'—'}</td>
       <td><span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}">${c.estado||'—'}</span></td>
       <td>${(c.creditos&&c.creditos[0]&&c.creditos[0].entidad)||c.entidad||'—'}</td>
