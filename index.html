@@ -1011,7 +1011,12 @@ function abrirClienteDesdeAvanzada(id){
 // -- TAB DATOS --
 function renderDatos(){
   const c=clienteActivo;
-  const tels=(c.telefonos||[]).map((t,i)=>`<div class="multi-item"><input value="${t}" onchange="editTel(${i},this.value)"><button class="btn btn-red btn-sm" onclick="delTel(${i})">✕</button></div>`).join('');
+  const wspList=c.telsWsp||[];
+  const tels=(c.telefonos||[]).map((t,i)=>{
+    const tieneWsp=!!t && wspList.includes(String(t).trim());
+    const wspBtn=`<button class="btn btn-sm" onclick="toggleWspTel(${i})" title="${tieneWsp?'Tiene WhatsApp (clic para quitar)':'Marcar como WhatsApp'}" style="padding:3px 7px;border:1px solid ${tieneWsp?'#25D366':'#ddd'};background:${tieneWsp?'#E7F9EE':'#fff'};color:${tieneWsp?'#128C7E':'#bbb'};font-weight:700">&#128172; WA</button>`;
+    return `<div class="multi-item"><input value="${t}" onchange="editTel(${i},this.value)">${wspBtn}<button class="btn btn-red btn-sm" onclick="delTel(${i})">✕</button></div>`;
+  }).join('');
   const mails=(c.mails||[]).map((m,i)=>`<div class="multi-item"><input value="${m}" onchange="editMail(${i},this.value)"><button class="btn btn-red btn-sm" onclick="delMail(${i})">✕</button></div>`).join('');
   return `
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -1520,15 +1525,44 @@ function addTel(){
 }
 function delTel(i){
   const idx=idxClienteActivo();
-  DB.clientes[idx].telefonos.splice(i,1);
-  clienteActivo=DB.clientes[idx];
+  const c=DB.clientes[idx];
+  const viejo=String(c.telefonos[i]||'').trim();
+  c.telefonos.splice(i,1);
+  // si ese número ya no figura en ninguna otra posición, sacarle la marca de WhatsApp
+  if(c.telsWsp && !c.telefonos.some(function(t){return String(t).trim()===viejo;})){
+    c.telsWsp=c.telsWsp.filter(function(x){return x!==viejo;});
+  }
+  clienteActivo=c;
   saveDB(clienteActivo);setTabAdmin('datos');
 }
 function editTel(i,v){
   const idx=idxClienteActivo();
-  DB.clientes[idx].telefonos[i]=v;
-  clienteActivo=DB.clientes[idx];
+  const c=DB.clientes[idx];
+  const viejo=String(c.telefonos[i]||'').trim();
+  c.telefonos[i]=v;
+  // si el número tenía WhatsApp, la marca acompaña al número editado
+  if(c.telsWsp && viejo && c.telsWsp.includes(viejo)){
+    c.telsWsp=c.telsWsp.filter(function(x){return x!==viejo;});
+    if(String(v).trim()) c.telsWsp.push(String(v).trim());
+    clienteActivo=c;
+    saveDB(clienteActivo);setTabAdmin('datos');
+    return;
+  }
+  clienteActivo=c;
   saveDB(clienteActivo);
+}
+// Marca / desmarca un teléfono como WhatsApp. Se guarda en un campo aparte
+// (telsWsp) del cliente, así los teléfonos existentes no se modifican.
+function toggleWspTel(i){
+  const idx=idxClienteActivo();
+  const c=DB.clientes[idx];
+  const t=String(c.telefonos[i]||'').trim();
+  if(!t){ alert('Primero cargá el número de teléfono'); return; }
+  if(!c.telsWsp) c.telsWsp=[];
+  if(c.telsWsp.includes(t)) c.telsWsp=c.telsWsp.filter(function(x){return x!==t;});
+  else c.telsWsp.push(t);
+  clienteActivo=c;
+  saveDB(clienteActivo);setTabAdmin('datos');
 }
 function addMail(){
   const idx=idxClienteActivo();
