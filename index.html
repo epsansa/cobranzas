@@ -760,7 +760,7 @@ function renderLista(){
     const ult=c.tramites&&c.tramites.length?c.tramites[c.tramites.length-1]:null;
     const sc={'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp';
     const tieneObs=c.obs && c.obs.trim();
-    const obsFechaFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : '';
+    const obsFechaFmt = c.obsFecha ? fmtDMA(c.obsFecha) : '';
     const obsResumen = tieneObs ? (c.obs.length>10 ? c.obs.slice(0,10)+'…' : c.obs) : '';
     return `<div class="ci ${clienteActivo&&clienteActivo.id===c.id?'sel':''}" onclick="selCliente('${c.id}')">
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
@@ -829,6 +829,41 @@ function selCliente(id){
 // se abrió por una vía que no lo dejó cargado ahí (por ej. desde Avanzada,
 // que usa la caché completa), lo agrega primero — así guardar/editar siempre
 // funciona, sin importar desde dónde se entró a la ficha.
+// ===== FORMATO DE FECHAS: siempre dd/mm/aaaa =====
+// Interpreta una fecha en cualquier formato habitual (ISO, dd/mm/aa, dd-mm-aaaa,
+// número de serie de Excel, Date) y devuelve un Date, o null si no se entiende.
+function parseFechaFlex(x){
+  if(x===null||x===undefined||x==='') return null;
+  if(x instanceof Date) return isNaN(x)?null:x;
+  if(typeof x==='number'){
+    if(x>20000 && x<80000){ var d0=new Date(Math.round((x-25569)*86400*1000)); return new Date(d0.getUTCFullYear(),d0.getUTCMonth(),d0.getUTCDate()); }
+    return null;
+  }
+  var s=String(x).trim();
+  if(!s) return null;
+  var m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);            // ISO yyyy-mm-dd
+  if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);   // dd/mm/aa(aa)
+  if(m){ var y=+m[3]; if(y<100) y+=2000; return new Date(y,+m[2]-1,+m[1]); }
+  if(/^\d{5}$/.test(s)) return parseFechaFlex(parseInt(s,10));  // serie de Excel como texto
+  return null;
+}
+function fmtDMA(x){
+  if(x===null||x===undefined||x==='') return '';
+  var d=parseFechaFlex(x);
+  if(!d) return String(x);
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+}
+// Para textos "fecha hora" tipo "9/10/2026 15:20": normaliza solo la parte de la fecha.
+function fmtDMAHora(s){
+  if(s===null||s===undefined||s==='') return '';
+  var str=String(s).trim();
+  var m=str.match(/^(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})[,\s]*(.*)$/);
+  if(!m) return str;
+  var f=fmtDMA(m[1]);
+  return m[2]?f+' '+m[2]:f;
+}
+
 function idxClienteActivo(){
   if(!clienteActivo) return -1;
   let i=DB.clientes.findIndex(function(c){return c.id===clienteActivo.id;});
@@ -987,7 +1022,7 @@ function aplicarAvanzada(){
   </div>
   <table class="tbl"><thead><tr><th>Nombre</th><th>DNI</th><th>Estado</th><th>Entidad</th><th>Cartera</th><th>Créditos</th><th>Observaciones</th></tr></thead><tbody>`+
     fil.map(c=>{
-      const obsFechaFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : '';
+      const obsFechaFmt = c.obsFecha ? fmtDMA(c.obsFecha) : '';
       const obsResumen = (c.obs&&c.obs.trim()) ? (c.obs.length>40?c.obs.slice(0,40)+'…':c.obs) : '—';
       const esActivo = clienteActivo && clienteActivo.id===c.id;
       return `<tr onclick="abrirClienteDesdeAvanzada('${c.id}')" class="${esActivo?'adv-row-sel':''}">
@@ -1062,7 +1097,7 @@ function renderCuenta(){
       <div class="card-hdr">
         <div>
           <div style="font-size:13px;font-weight:600">${cr.producto||'Crédito'} — N° ${cr.num||'—'}</div>
-          <div style="font-size:11px;color:#888;margin-top:2px">${cr.comercio||'—'} · Mora: ${cr.fecha||'—'} · Entidad: <strong>${cr.entidad||'—'}</strong> · Cartera: <strong>${cr.cartera||'—'}</strong></div>
+          <div style="font-size:11px;color:#888;margin-top:2px">${cr.comercio||'—'} · Mora: ${fmtDMA(cr.fecha)||'—'} · Entidad: <strong>${cr.entidad||'—'}</strong> · Cartera: <strong>${cr.cartera||'—'}</strong></div>
         </div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-outline btn-sm" onclick="abrirEditarCredito(${i})">✏️</button>
@@ -1104,13 +1139,13 @@ function renderCuenta(){
             const detallePagos = (p.pagosHistorial && p.pagosHistorial.length>1) ?
               '<div style="font-size:9.5px;color:#888;margin-top:2px;line-height:1.5">'+
                 p.pagosHistorial.map(function(x){
-                  var f=x.fecha?new Date(x.fecha+'T00:00:00').toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit',year:'2-digit'}):'—';
+                  var f=x.fecha?fmtDMA(x.fecha):'—';
                   return f+': $'+Math.round(x.monto||0).toLocaleString('es-AR');
                 }).join(' · ')+
               '</div>' : '';
             return '<div class="cuota-row-tbl '+(p.pagada?'cuota-pagada':'')+'" style="'+bg+'">'+
               '<div style="font-weight:'+(esAnticipo?'700':'400')+'">'+label+'</div>'+
-              '<div>'+p.vto+'</div>'+
+              '<div>'+fmtDMA(p.vto)+'</div>'+
               '<div>$'+parseFloat(p.monto||0).toLocaleString('es-AR')+'</div>'+
               '<div>'+estadoTxt+detallePagos+'</div>'+
               '<div>'+
@@ -1136,7 +1171,7 @@ function renderCuenta(){
               const est=p.pagada?'✅ Pagada':(esA?'💰 Anticipo':'⏳ Pendiente');
               return '<div class="cuota-row-tbl" style="background:#efefef;color:#555">'+
                 '<div>'+lbl+'</div>'+
-                '<div>'+p.vto+'</div>'+
+                '<div>'+fmtDMA(p.vto)+'</div>'+
                 '<div>$'+parseFloat(p.monto||0).toLocaleString('es-AR')+'</div>'+
                 '<div>'+est+'</div>'+
                 '<div></div>'+
@@ -1176,7 +1211,7 @@ function generarSeccionDS(c){
   if(!credsDS.length) credsDS=c.creditos||[];
   credsDS.forEach(function(cr){
     html+='<div style="background:#f4f8fd;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:12px">';
-    html+='<strong>'+(cr.num||'Sin n\u00famero')+'</strong>  &middot;  Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong>  &middot;  Mora: <strong>'+(cr.fecha||'—')+'</strong>';
+    html+='<strong>'+(cr.num||'Sin n\u00famero')+'</strong>  &middot;  Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong>  &middot;  Mora: <strong>'+(fmtDMA(cr.fecha)||'—')+'</strong>';
     html+='</div>';
   });
   html+='<div id="ds-resultado"></div></div>';
@@ -1198,23 +1233,8 @@ function calcDS(){
     var capital=parseFloat(cr.capital)||0;
     if(!capital) return;
     var fVto=fHoy;
-if(cr.fecha){
-  var f=cr.fecha.toString().trim();
-  // Intentar formato dd/mm/yy o dd/mm/yyyy
-  var partes=f.split(/[\/\-]/);
-  if(partes.length===3){
-    var d=parseInt(partes[0]),m=parseInt(partes[1])-1,y=parseInt(partes[2]);
-    if(y<100) y+=2000;
-    // Si el primer numero es > 12, definitivamente es dia
-    // Si no, asumir dd/mm/yyyy (formato argentino)
-    fVto=new Date(y,m,d);
-  } else if(f.length===10 && f.indexOf('-')>0){
-    // Formato ISO yyyy-mm-dd
-    fVto=new Date(f);
-  } else {
-    fVto=new Date(f);
-  }
-}
+var _fm=parseFechaFlex(cr.fecha);
+if(_fm) fVto=_fm; else if(cr.fecha){ var _fd=new Date(cr.fecha); if(!isNaN(_fd)) fVto=_fd; }
     var dias=Math.max(0,Math.round((fHoy-fVto)/(1000*60*60*24)));
     diasAtraso=Math.max(diasAtraso,dias);
     totalCapital+=capital;
@@ -1333,7 +1353,7 @@ function renderTramites(){
       if(i===0) html+=' <span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; &Uacute;LTIMO</span>';
       html+='</div>';
       html+='<div style="display:flex;align-items:center;gap:8px">';
-      html+='<span class="tr-fecha">'+t.fechaHora+'</span>';
+      html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+'</span>';
       html+='<button class="btn btn-outline btn-sm" onclick="editarTramite('+idxReal+')" title="Editar">&#9998;</button>';
       html+='<button class="btn btn-red btn-sm" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
       html+='</div></div>';
@@ -1392,7 +1412,7 @@ function ejecutarBusqueda(){
 // -- TAB OBS --
 function renderObs(){
   const c=clienteActivo;
-  const fFmt = c.obsFecha ? new Date(c.obsFecha+'T00:00:00').toLocaleDateString('es-AR') : null;
+  const fFmt = c.obsFecha ? fmtDMA(c.obsFecha) : null;
   return `
   <div class="card">
     <div class="card-hdr" style="margin-bottom:10px">
@@ -1431,11 +1451,11 @@ function renderDashboard(){
     <div class="stat"><div class="sn">${nCr}</div><div class="sl">Créditos</div></div>
     <div class="stat"><div class="sn" style="color:#791F1F">$${Math.round(totalDeuda).toLocaleString('es-AR')}</div><div class="sl">Total deuda</div></div>
     <div class="stat"><div class="sn">${nTr}</div><div class="sl">Trámites</div></div>
-    <div class="stat"><div class="sn">${ult?ult.fechaHora.slice(0,10):'—'}</div><div class="sl">Último contacto</div></div>
+    <div class="stat"><div class="sn">${ult?fmtDMAHora(ult.fechaHora).slice(0,10):'—'}</div><div class="sl">Último contacto</div></div>
   </div>
   ${ult?`<div class="card"><div class="card-title" style="margin-bottom:8px">Último trámite</div>
     <div class="tr-item last">
-      <div class="tr-hdr"><span class="tr-tipo">${ult.tipo}</span><span class="tr-fecha">${ult.fechaHora}</span></div>
+      <div class="tr-hdr"><span class="tr-tipo">${ult.tipo}</span><span class="tr-fecha">${fmtDMAHora(ult.fechaHora)}</span></div>
       <div class="tr-nota">${ult.nota}</div>
     </div></div>`:''}`;
 }
@@ -1682,7 +1702,7 @@ function guardarPlan(){
   if(credito.plan && credito.plan.length>0){
     if(!credito.planesAnteriores) credito.planesAnteriores=[];
     credito.planesAnteriores.push({
-      creadoEl: new Date().toLocaleDateString('es-AR'),
+      creadoEl: fmtDMA(new Date()),
       cuotas: credito.plan
     });
   }
@@ -1852,7 +1872,7 @@ function generarSubdiario(){
     '<th style="padding:6px 4px">Fecha</th><th style="padding:6px 4px">Entidad</th><th style="padding:6px 4px">Cliente</th>'+
     '<th style="padding:6px 4px">DNI</th><th style="padding:6px 4px">Crédito</th><th style="padding:6px 4px;text-align:right">Monto</th></tr>';
   pagos.forEach(function(p){
-    var fFmt=new Date(p.fecha+'T00:00:00').toLocaleDateString('es-AR');
+    var fFmt=fmtDMA(p.fecha);
     html+='<tr style="border-bottom:1px solid #f0f0ec">'+
       '<td style="padding:6px 4px">'+fFmt+'</td>'+
       '<td style="padding:6px 4px">'+p.entidad+'</td>'+
@@ -1872,7 +1892,7 @@ function exportarSubdiarioExcel(){
   if(!pagos.length || typeof XLSX==='undefined') return;
   var filas=pagos.map(function(p){
     return {
-      'Fecha': new Date(p.fecha+'T00:00:00').toLocaleDateString('es-AR'),
+      'Fecha': fmtDMA(p.fecha),
       'Entidad': p.entidad,
       'Cartera': p.cartera,
       'Cliente': p.cliente,
@@ -1908,7 +1928,7 @@ function guardarTramite(){
   const tel=document.getElementById('tr-tel').value.trim();
   const est=document.getElementById('tr-est').value;
   const now=new Date();
-  const fechaHora=now.toLocaleDateString('es-AR')+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  const fechaHora=fmtDMA(now)+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
   const tramite={
     tipo:document.getElementById('tr-tipo').value,
     fechaHora,
@@ -2168,7 +2188,7 @@ function filtrarPromesas(){
       const f=t.fechaHora.slice(0,10);
       if(desde&&f<desde) return;
       if(hasta&&f>hasta) return;
-      rows.push({cliente:c.nombre,dni:c.dni,fecha:t.fechaHora,nota:t.nota});
+      rows.push({cliente:c.nombre,dni:c.dni,fecha:fmtDMAHora(t.fechaHora),nota:t.nota});
     });
   });
   const el=document.getElementById('res-promesas');
@@ -2533,9 +2553,9 @@ function exportarExcelClientes(clientes,filename){
         Mails:v((c.mails||[]).join(' / ')),
         Entidad:v(cr.entidad||c.entidad),Cartera:v(cr.cartera||c.cartera),
         Estado:v(c.estado),Producto:v(cr.producto),Comercio:v(cr.comercio),
-        Credito:v(cr.num),FechaMora:v(cr.fecha),Capital:v(cr.capital),
-        UltimoTramite:v(ult?ult.nota:''),FechaUltimoTramite:v(ult?ult.fechaHora:''),
-        Observaciones:v(c.obs),FechaObservacion:v(c.obsFecha)
+        Credito:v(cr.num),FechaMora:v(fmtDMA(cr.fecha)),Capital:v(cr.capital),
+        UltimoTramite:v(ult?ult.nota:''),FechaUltimoTramite:v(ult?fmtDMAHora(ult.fechaHora):''),
+        Observaciones:v(c.obs),FechaObservacion:v(fmtDMA(c.obsFecha))
       });
     });
   });
