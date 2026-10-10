@@ -15,7 +15,7 @@
 <script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp, query, orderBy, limit, startAfter } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp, query, orderBy, limit, startAfter, where, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -57,6 +57,7 @@ window.loginEpsan = async function(){
 
 window.logoutEpsan = async function(){
   if(!confirm('¿Cerrar sesión?')) return;
+  try{ await _IDB.limpiar(); }catch(e){}
   await signOut(auth);
 };
 
@@ -106,13 +107,80 @@ window._actualizarClienteEnCache=function(cliente){
   const i=window._todosClientesCache.findIndex(function(c){return c.id===cliente.id;});
   if(i>=0) window._todosClientesCache[i]=cliente;
   else window._todosClientesCache.push(cliente);
+  _idbEncolar(cliente);
 };
 window._eliminarClienteDeCache=function(id){
   if(!window._todosClientesCache) return;
   window._todosClientesCache=window._todosClientesCache.filter(function(c){return c.id!==id;});
+  delete _idbPend[id]; _IDB.borrar(id);
 };
 
+// ===== Caché local persistente (IndexedDB) para que el login no tenga que bajar toda la base =====
+const _IDB={
+  db:null,
+  abrir:function(){
+    if(_IDB._p) return _IDB._p;
+    _IDB._p=new Promise(function(res){
+      try{
+        const rq=indexedDB.open('epsan_cache_v1',1);
+        rq.onupgradeneeded=function(){ const d=rq.result; d.createObjectStore('clientes',{keyPath:'id'}); d.createObjectStore('meta'); };
+        rq.onsuccess=function(){ _IDB.db=rq.result; res(_IDB.db); };
+        rq.onerror=function(){ res(null); };
+      }catch(e){ res(null); }
+    });
+    return _IDB._p;
+  },
+  tx:async function(stores,modo,fn){
+    const d=await _IDB.abrir(); if(!d) return null;
+    return new Promise(function(res){
+      try{
+        const t=d.transaction(stores,modo); const out=fn(t);
+        t.oncomplete=function(){ res(out&&out.result!==undefined?out.result:true); };
+        t.onerror=t.onabort=function(){ res(null); };
+      }catch(e){ res(null); }
+    });
+  },
+  leerTodo:async function(){
+    const d=await _IDB.abrir(); if(!d) return null;
+    return new Promise(function(res){
+      try{
+        const t=d.transaction(['clientes','meta'],'readonly');
+        const a=t.objectStore('clientes').getAll(), m=t.objectStore('meta').get('meta');
+        t.oncomplete=function(){ res({clientes:(a.result||[]).map(function(r){return r.c;}), meta:m.result||null}); };
+        t.onerror=t.onabort=function(){ res(null); };
+      }catch(e){ res(null); }
+    });
+  },
+  guardarTodo:function(arr,meta){
+    return _IDB.tx(['clientes','meta'],'readwrite',function(t){
+      const cs=t.objectStore('clientes'); cs.clear();
+      arr.forEach(function(c){ if(c&&c.id) cs.put({id:c.id,c:c}); });
+      t.objectStore('meta').put(meta,'meta');
+    });
+  },
+  guardarVarios:function(arr,meta){
+    return _IDB.tx(['clientes','meta'],'readwrite',function(t){
+      const cs=t.objectStore('clientes');
+      arr.forEach(function(c){ if(c&&c.id) cs.put({id:c.id,c:c}); });
+      if(meta) t.objectStore('meta').put(meta,'meta');
+    });
+  },
+  borrar:function(id){ return _IDB.tx(['clientes'],'readwrite',function(t){ t.objectStore('clientes').delete(id); }); },
+  limpiar:function(){ return _IDB.tx(['clientes','meta'],'readwrite',function(t){ t.objectStore('clientes').clear(); t.objectStore('meta').clear(); }); }
+};
+window._idbEpsan=_IDB;
+let _idbPend={}, _idbTimer=null;
+function _idbEncolar(c){
+  _idbPend[c.id]=c;
+  clearTimeout(_idbTimer);
+  _idbTimer=setTimeout(function(){ const v=Object.values(_idbPend); _idbPend={}; _IDB.guardarVarios(v,null); },1500);
+}
+
 window.saveDB=function(clienteModificado){
+  if(clienteModificado && clienteModificado.id){
+    clienteModificado.modificadoPor=window._fbUserEmail||'';
+    clienteModificado.modificadoEl=new Date().toISOString();
+  }
   try {
     localStorage.setItem('epsan_v3',JSON.stringify(window.DB));
     const hoy=new Date().toISOString().slice(0,10);
@@ -165,6 +233,7 @@ window.importarMasivo=async function(clientes,reemplazar){
     await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
     // Actualizar la caché con lo que ya sabemos, en vez de tirarla entera (evita un refetch innecesario)
+    _IDB.limpiar(); // la próxima vez se vuelve a bajar todo completo
     if(reemplazar){ window._todosClientesCache = clientes.slice(); }
     else if(window._todosClientesCache){ window._todosClientesCache = window._todosClientesCache.concat(clientes); }
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
@@ -246,27 +315,76 @@ async function cargarDatos(){
       }
     }
 
+    const MAX_SIN_RESYNC_COMPLETO = 3*24*3600*1000; // cada 3 días se baja todo de nuevo (detecta borrados de otros usuarios)
+    const SOLAPE_MS = 5*60*1000;                     // margen de seguridad al pedir "lo cambiado desde..."
+    function _tsMillis(d){ try{ const t=d.data().ts; return t&&t.toMillis?t.toMillis():0; }catch(e){ return 0; } }
+
+    async function descargaCompleta(){
+      const TAM_LOTE=300;
+      const arr=[]; let cursor=null, maxTs=0;
+      while(true){
+        const snap = await traerLoteConReintento(cursor, TAM_LOTE);
+        if(snap.empty) break;
+        snap.forEach(function(d){ try{ arr.push(JSON.parse(d.data().data)); const t=_tsMillis(d); if(t>maxTs) maxTs=t; }catch(e){} });
+        window._todosClientesCache = arr.slice();
+        if(typeof window._fbActualizarIndicador==='function') window._fbActualizarIndicador('ok');
+        if(snap.docs.length < TAM_LOTE) break;
+        cursor = snap.docs[snap.docs.length-1];
+      }
+      window._todosClientesCache = arr;
+      _IDB.guardarTodo(arr,{lastTs:maxTs,lastFull:Date.now()}); // en segundo plano, no bloquea
+      return arr;
+    }
+
+    // Solo trae los documentos modificados desde la última vez y los mezcla con lo local
+    async function descargaIncremental(local,meta){
+      const map=new Map(); local.forEach(function(c){ if(c&&c.id) map.set(c.id,c); });
+      window._todosClientesCache=Array.from(map.values()); // ya usable (instantáneo)
+      let desde=Timestamp.fromMillis(Math.max(0,meta.lastTs-SOLAPE_MS));
+      let maxTs=meta.lastTs; const cambios=[]; let cursor=null;
+      while(true){
+        let intentos=0, snap;
+        while(true){
+          try{
+            const q=cursor
+              ? query(CLIENTES_COL, where('ts','>',desde), orderBy('ts'), startAfter(cursor), limit(300))
+              : query(CLIENTES_COL, where('ts','>',desde), orderBy('ts'), limit(300));
+            snap=await getDocs(q); break;
+          }catch(e){ intentos++; if(intentos>=3) throw e; await new Promise(function(r){ setTimeout(r,1200*intentos); }); }
+        }
+        if(snap.empty) break;
+        snap.forEach(function(d){ try{ const c=JSON.parse(d.data().data); if(c&&c.id){ map.set(c.id,c); cambios.push(c); } const t=_tsMillis(d); if(t>maxTs) maxTs=t; }catch(e){} });
+        if(snap.docs.length<300) break;
+        cursor=snap.docs[snap.docs.length-1];
+      }
+      const arr=Array.from(map.values());
+      window._todosClientesCache=arr;
+      _IDB.guardarVarios(cambios,{lastTs:maxTs,lastFull:meta.lastFull});
+      return arr;
+    }
+
     window.obtenerTodosClientes = async function(forzar){
-      if(!forzar && window._todosClientesCache){
+      if(!forzar && window._todosClientesCache && window._baseCargada){
         return window._todosClientesCache;
       }
       if(!forzar && window._cargandoClientesPromesa){
         return window._cargandoClientesPromesa;
       }
+      if(!forzar && window._todosClientesCache && !window._cargandoClientesPromesa){
+        return window._todosClientesCache; // caché ya armada en esta sesión
+      }
       window._cargandoClientesPromesa = (async function(){
-        const TAM_LOTE=300; // lotes chicos: menos chance de timeout que traer todo de un saque
-        const arr=[];
-        let cursor=null;
-        while(true){
-          const snap = await traerLoteConReintento(cursor, TAM_LOTE);
-          if(snap.empty) break;
-          snap.forEach(function(d){ try{ arr.push(JSON.parse(d.data().data)); }catch(e){} });
-          window._todosClientesCache = arr.slice(); // disponible parcialmente mientras sigue trayendo el resto
-          if(typeof window._fbActualizarIndicador==='function') window._fbActualizarIndicador('ok');
-          if(snap.docs.length < TAM_LOTE) break; // último lote, no hay más
-          cursor = snap.docs[snap.docs.length-1];
+        let arr=null;
+        if(!forzar){
+          try{
+            const loc=await _IDB.leerTodo();
+            const m=loc&&loc.meta;
+            if(loc && m && m.lastTs>0 && loc.clientes.length>0 && (Date.now()-m.lastFull)<MAX_SIN_RESYNC_COMPLETO){
+              arr=await descargaIncremental(loc.clientes,m);
+            }
+          }catch(e){ console.warn('Sync incremental falló, se hace descarga completa:',e); arr=null; }
         }
-        window._todosClientesCache = arr;
+        if(!arr) arr=await descargaCompleta();
         window._cargandoClientesPromesa = null;
         return arr;
       })().catch(function(e){ window._cargandoClientesPromesa = null; throw e; });
@@ -311,6 +429,7 @@ onAuthStateChanged(auth, function(user){
     // Usuario logueado — mostrar app y cargar datos
     const emailEl=document.getElementById('user-email');
     if(emailEl) emailEl.textContent=user.email;
+    window._fbUserEmail=user.email||'';
     mostrarApp();
     var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
   } else {
@@ -1353,7 +1472,7 @@ function renderTramites(){
       if(i===0) html+=' <span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; &Uacute;LTIMO</span>';
       html+='</div>';
       html+='<div style="display:flex;align-items:center;gap:8px">';
-      html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+'</span>';
+      html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+(t.user?' &middot; '+String(t.user).split('@')[0]:'')+'</span>';
       html+='<button class="btn btn-outline btn-sm" onclick="editarTramite('+idxReal+')" title="Editar">&#9998;</button>';
       html+='<button class="btn btn-red btn-sm" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
       html+='</div></div>';
@@ -1934,7 +2053,8 @@ function guardarTramite(){
     fechaHora,
     nota,
     tel:tel||null,
-    estadoCambio:est||null
+    estadoCambio:est||null,
+    user:(window._fbUserEmail||'')
   };
   const idx=idxClienteActivo();
   if(!DB.clientes[idx].tramites) DB.clientes[idx].tramites=[];
@@ -2180,14 +2300,16 @@ function filtrarPromesas(){
   const desde=document.getElementById('cp-desde').value;
   const hasta=document.getElementById('cp-hasta').value;
   const rows=[];
-  DB.clientes.forEach(c=>{
+  const dDesde=desde?parseFechaFlex(desde):null, dHasta=hasta?parseFechaFlex(hasta):null;
+  (window._todosClientesCache||DB.clientes).forEach(c=>{
     const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
     if(!enEnt||!enCar) return;
     (c.tramites||[]).filter(t=>t.tipo==='Promesa de pago').forEach(t=>{
-      const f=t.fechaHora.slice(0,10);
-      if(desde&&f<desde) return;
-      if(hasta&&f>hasta) return;
+      const df=parseFechaFlex(t.fechaHora);
+      if((dDesde||dHasta)&&!df) return;
+      if(dDesde&&df<dDesde) return;
+      if(dHasta&&df>dHasta) return;
       rows.push({cliente:c.nombre,dni:c.dni,fecha:fmtDMAHora(t.fechaHora),nota:t.nota});
     });
   });
@@ -2506,7 +2628,8 @@ function filtrarParaExportar(){
   const est=document.getElementById('exp-est').value;
   const fmd=document.getElementById('exp-fmd').value;
   const fmh=document.getElementById('exp-fmh').value;
-  return DB.clientes.filter(function(c){
+  const dMD=fmd?parseFechaFlex(fmd):null, dMH=fmh?parseFechaFlex(fmh):null;
+  return (window._todosClientesCache||DB.clientes).filter(function(c){
     if(est&&c.estado!==est) return false;
     const creds=c.creditos||[];
     if(ent||car||com||fmd||fmh){
@@ -2514,9 +2637,9 @@ function filtrarParaExportar(){
         if(ent&&(cr.entidad||c.entidad)!==ent) return false;
         if(car&&(cr.cartera||c.cartera)!==car) return false;
         if(com&&(cr.comercio||'')!==com) return false;
-        const f=cr.fecha||'';
-        if(fmd&&(!f||f<fmd)) return false;
-        if(fmh&&(!f||f>fmh)) return false;
+        const df=parseFechaFlex(cr.fecha);
+        if(dMD&&(!df||df<dMD)) return false;
+        if(dMH&&(!df||df>dMH)) return false;
         return true;
       });
     }
@@ -2903,6 +3026,12 @@ function renderMantenimiento(){
       '<button class="btn btn-outline" onclick="renderMantenimiento()">&#8635; Actualizar preview</button>'+
     '</div>'+
     '<div class="card">'+
+      '<div class="card-hdr"><div class="card-title">&#128190; Copia de seguridad</div>'+
+        '<button class="btn btn-dark btn-sm" id="btn-backup" onclick="descargarBackup()">&#11015; Descargar backup</button>'+
+      '</div>'+
+      '<p style="font-size:12px;color:#555">Descarga un archivo con todos los clientes y la configuraci&oacute;n (entidades, carteras, comercios, estados). Guardalo en un lugar seguro; conviene hacerlo cada tanto.</p>'+
+    '</div>'+
+    '<div class="card">'+
       '<div class="card-hdr"><div class="card-title">&#128197; Fechas de observaciones faltantes</div>'+
         (sinFecha.length?'<button class="btn btn-dark btn-sm" onclick="ejecutarCompletarFechasObs()">&#10003; Completar con la fecha de hoy</button>':'')+
       '</div>'+
@@ -2911,6 +3040,25 @@ function renderMantenimiento(){
         '<div style="color:#854F0B;font-size:12px;margin-bottom:4px"><strong>'+sinFecha.length+'</strong> cliente/s con observación sin fecha registrada.</div>'
         :'<div style="color:#27500A;font-size:12px">&#10003; Todas las observaciones tienen fecha registrada.</div>')+
     '</div>';
+}
+
+async function descargarBackup(){
+  const btn=document.getElementById('btn-backup');
+  if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
+  try{
+    const todos=await window.obtenerTodosClientes();
+    const out={app:'Sistema Collector EPSAN',generado:new Date().toISOString(),usuario:window._fbUserEmail||'',
+      config:{entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados},
+      cantidadClientes:todos.length,clientes:todos};
+    const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
+    const a=document.createElement('a');
+    const h=new Date(); const pad=function(n){return String(n).padStart(2,'0');};
+    a.href=URL.createObjectURL(blob);
+    a.download='backup-epsan-'+h.getFullYear()+pad(h.getMonth()+1)+pad(h.getDate())+'-'+pad(h.getHours())+pad(h.getMinutes())+'.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); },5000);
+  }catch(e){ alert('No se pudo generar el backup: '+e.message); }
+  if(btn){ btn.disabled=false; btn.innerHTML='&#11015; Descargar backup'; }
 }
 
 function ejecutarRenombradoCarteras(){
