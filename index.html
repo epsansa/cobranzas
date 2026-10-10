@@ -2377,7 +2377,7 @@ function setTabHerr(tab,el){
 }
 
 function renderBackupTab(){
-  const total=DB.clientes.length;
+  const total=(window._todosClientesCache||DB.clientes).length;
   const now=new Date().toLocaleString('es-AR');
   document.getElementById('herrContent').innerHTML=`
   <div class="card">
@@ -2701,41 +2701,46 @@ function exportarExcel(){ exportarExcelClientes(window._todosClientesCache||DB.c
 // ===================================================
 // BACKUP Y RESTAURAR
 // ===================================================
-function hacerBackup(){
-  const now = new Date();
-  const pad = n => String(n).padStart(2,'0');
-  const fecha = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  const backup = {
-    version: '1.0',
-    fecha: now.toLocaleString('es-AR'),
-    clientes: DB.clientes,
-    entidades: DB.entidades,
-    carteras: DB.carteras
-  };
-  const blob = new Blob([JSON.stringify(backup, null, 2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `backup_epsan_${fecha}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+async function hacerBackup(){
+  const btn=document.querySelector('#herrContent button[onclick="hacerBackup()"]');
+  if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
+  try{
+    const todos=await window.obtenerTodosClientes();
+    const now=new Date(); const pad=n=>String(n).padStart(2,'0');
+    const fecha=`${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const backup={version:'2.0',fecha:now.toLocaleString('es-AR'),usuario:window._fbUserEmail||'',
+      clientes:todos,entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios||[],estados:DB.estados||[]};
+    const blob=new Blob([JSON.stringify(backup)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download=`backup_epsan_${fecha}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  }catch(err){ alert('No se pudo generar el backup: '+err.message); }
+  if(btn){ btn.disabled=false; btn.textContent='Descargar Backup'; }
 }
 
 function restaurarBackup(e){
   const file = e.target.files[0]; if(!file) return;
   const reader = new FileReader();
-  reader.onload = function(ev){
+  reader.onload = async function(ev){
     try{
       const backup = JSON.parse(ev.target.result);
-      if(!backup.clientes) throw new Error('Archivo no válido');
-      if(!confirm(`¿Restaurar backup del ${backup.fecha}?\n${backup.clientes.length} clientes.\nSe reemplazará la base actual.`)) return;
-      DB.clientes = backup.clientes;
+      if(!backup.clientes || !Array.isArray(backup.clientes)) throw new Error('Archivo no válido');
+      if(!confirm(`¿Restaurar backup del ${backup.fecha}?\n${backup.clientes.length} clientes.\nSe BORRA la base actual en la nube y se reemplaza por este archivo.`)) return;
+      if(!confirm('Segunda confirmación: esto reemplaza TODOS los clientes actuales. ¿Continuar?')) return;
       if(backup.entidades) DB.entidades = backup.entidades;
       if(backup.carteras) DB.carteras = backup.carteras;
-      saveDB(); renderLista(); renderHerramientas();
-      alert(`✅ Backup restaurado correctamente.\n${DB.clientes.length} clientes cargados.`);
+      if(backup.comercios) DB.comercios = backup.comercios;
+      if(backup.estados && backup.estados.length) DB.estados = backup.estados;
+      const ok = await window.importarMasivo(backup.clientes, true);
+      if(!ok) throw new Error('falló el guardado en la nube');
+      DB.clientes = backup.clientes;
+      renderLista(); renderHerramientas();
+      alert(`✅ Backup restaurado y guardado en la nube.\n${backup.clientes.length} clientes cargados.`);
     } catch(err){
       alert('Error al restaurar: ' + err.message);
     }
+    e.target.value='';
   };
   reader.readAsText(file);
 }
@@ -3026,12 +3031,6 @@ function renderMantenimiento(){
       '<button class="btn btn-outline" onclick="renderMantenimiento()">&#8635; Actualizar preview</button>'+
     '</div>'+
     '<div class="card">'+
-      '<div class="card-hdr"><div class="card-title">&#128190; Copia de seguridad</div>'+
-        '<button class="btn btn-dark btn-sm" id="btn-backup" onclick="descargarBackup()">&#11015; Descargar backup</button>'+
-      '</div>'+
-      '<p style="font-size:12px;color:#555">Descarga un archivo con todos los clientes y la configuraci&oacute;n (entidades, carteras, comercios, estados). Guardalo en un lugar seguro; conviene hacerlo cada tanto.</p>'+
-    '</div>'+
-    '<div class="card">'+
       '<div class="card-hdr"><div class="card-title">&#128197; Fechas de observaciones faltantes</div>'+
         (sinFecha.length?'<button class="btn btn-dark btn-sm" onclick="ejecutarCompletarFechasObs()">&#10003; Completar con la fecha de hoy</button>':'')+
       '</div>'+
@@ -3040,25 +3039,6 @@ function renderMantenimiento(){
         '<div style="color:#854F0B;font-size:12px;margin-bottom:4px"><strong>'+sinFecha.length+'</strong> cliente/s con observación sin fecha registrada.</div>'
         :'<div style="color:#27500A;font-size:12px">&#10003; Todas las observaciones tienen fecha registrada.</div>')+
     '</div>';
-}
-
-async function descargarBackup(){
-  const btn=document.getElementById('btn-backup');
-  if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
-  try{
-    const todos=await window.obtenerTodosClientes();
-    const out={app:'Sistema Collector EPSAN',generado:new Date().toISOString(),usuario:window._fbUserEmail||'',
-      config:{entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados},
-      cantidadClientes:todos.length,clientes:todos};
-    const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
-    const a=document.createElement('a');
-    const h=new Date(); const pad=function(n){return String(n).padStart(2,'0');};
-    a.href=URL.createObjectURL(blob);
-    a.download='backup-epsan-'+h.getFullYear()+pad(h.getMonth()+1)+pad(h.getDate())+'-'+pad(h.getHours())+pad(h.getMinutes())+'.json';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(function(){ URL.revokeObjectURL(a.href); },5000);
-  }catch(e){ alert('No se pudo generar el backup: '+e.message); }
-  if(btn){ btn.disabled=false; btn.innerHTML='&#11015; Descargar backup'; }
 }
 
 function ejecutarRenombradoCarteras(){
