@@ -5,7 +5,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Sistema de Cobranzas">
+<meta name="apple-mobile-web-app-title" content="Collector">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="pragma" content="no-cache">
@@ -515,13 +515,18 @@ a{color:inherit;text-decoration:none}
 /* APP */
 #app{display:none;flex-direction:column;height:100vh}
 .topnav{background:linear-gradient(135deg,#1a3a6b 0%,#2557a7 100%);color:#fff;display:flex;align-items:center;height:44px;padding:0 16px;gap:4px;flex-shrink:0;border-bottom:2px solid #4a80d4}
-.topnav .logo{font-size:14px;font-weight:600;margin-right:16px;white-space:nowrap;letter-spacing:.02em}
+.topnav .logo{font-size:14px;font-weight:600;margin-right:16px;white-space:nowrap;letter-spacing:.02em;flex-shrink:0}
+.topnav{overflow:hidden;flex-wrap:nowrap;min-width:0}
+.topnav #fb-status,.topnav #fecha-hoy{white-space:nowrap;flex-shrink:0}
+.topnav .modnav{flex-shrink:0}
+.topnav-right{flex-shrink:1;min-width:0;white-space:nowrap}
+.topnav-right .btn-logout{flex-shrink:0}
 .modnav{display:flex;gap:2px}
 .modnav .mb{padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;color:#a8c4e8;white-space:nowrap;transition:background .15s}
 .modnav .mb:hover{background:rgba(255,255,255,.12);color:#fff}
 .modnav .mb.active{background:#fff;color:#1a3a6b;font-weight:600}
 .topnav-right{margin-left:auto;display:flex;align-items:center;gap:10px}
-#user-email{font-size:11px;color:#a8c4e8}
+#user-email{font-size:11px;color:#a8c4e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:200px}
 .btn-logout{padding:3px 10px;border-radius:6px;border:1px solid #a8c4e8;background:transparent;color:#a8c4e8;font-size:11px;cursor:pointer}
 .btn-logout:hover{background:rgba(255,255,255,.15);color:#fff}
 
@@ -608,7 +613,7 @@ a{color:inherit;text-decoration:none}
 <!-- PANTALLA LOGIN -->
 <div id="login-screen">
   <div class="login-box">
-    <h2>&#9878; Sistema de Cobranzas</h2>
+    <h2>&#9878; Collector</h2>
     <p>EPSAN — Acceso restringido</p>
     <div class="login-fld">
       <label>Usuario (mail)</label>
@@ -626,7 +631,7 @@ a{color:inherit;text-decoration:none}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Sistema de Cobranzas</div>
+  <div class="logo">&#9878; Collector</div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -634,7 +639,6 @@ a{color:inherit;text-decoration:none}
     <div class="mb active" onclick="setMod('admin',this)">Administraci&#243;n</div>
     <div class="mb" onclick="setMod('consultas',this)">Consultas</div>
     <div class="mb" onclick="setMod('herramientas',this)">Herramientas</div>
-    <button class="btn-logout" onclick="abrirSubdiario()" style="margin-left:10px" title="Subdiario de pagos">&#128209; Subdiario</button>
   </div>
   <div class="topnav-right">
     <span id="user-email"></span>
@@ -705,18 +709,23 @@ a{color:inherit;text-decoration:none}
 
 <div class="modal-overlay" id="modalPlan"><div class="modal">
   <h3>Generar Plan de Pagos</h3>
+  <div style="background:#eef4fb;border:1px solid #c5d8ee;border-radius:8px;padding:12px;margin-bottom:12px">
+    <div style="font-size:11px;font-weight:600;color:#1a4a8a;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Créditos a incluir</div>
+    <div id="pl-creds"></div>
+    <div id="pl-reparto" style="font-size:11px;color:#555;margin-top:8px"></div>
+  </div>
   <div style="background:#f8f4e8;border:1px solid #e8d89a;border-radius:8px;padding:12px;margin-bottom:12px">
     <div style="font-size:11px;font-weight:600;color:#7a6010;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Anticipo (opcional)</div>
     <div class="g2" style="gap:10px">
-      <div class="fld"><label>Monto anticipo ($)</label><input id="pl-ant-monto" type="number" placeholder="Dejar vacío si no aplica"></div>
+      <div class="fld"><label>Monto anticipo ($)</label><input id="pl-ant-monto" type="number" placeholder="Dejar vacío si no aplica" oninput="previewReparto()"></div>
       <div class="fld"><label>Vencimiento anticipo</label><input id="pl-ant-vto" type="date"></div>
     </div>
   </div>
   <div style="background:#f5f5f5;border-radius:8px;padding:12px;margin-bottom:10px">
     <div style="font-size:11px;font-weight:600;color:#555;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">Cuotas del plan</div>
     <div class="g2" style="gap:10px">
-      <div class="fld"><label>Cantidad de cuotas</label><input id="pl-cuotas" type="number" value="3" min="1"></div>
-      <div class="fld"><label>Monto por cuota ($)</label><input id="pl-monto" type="number" placeholder="5000"></div>
+      <div class="fld"><label>Cantidad de cuotas</label><input id="pl-cuotas" type="number" value="3" min="1" oninput="previewReparto()"></div>
+      <div class="fld"><label>Monto por cuota ($)</label><input id="pl-monto" type="number" placeholder="5000" oninput="previewReparto()"></div>
       <div class="fld"><label>Vencimiento 1º cuota</label><input id="pl-vto" type="date"></div>
     </div>
   </div>
@@ -1222,7 +1231,6 @@ function renderCuenta(){
         </div>
         <div style="display:flex;gap:6px">
           <button class="btn btn-outline btn-sm" onclick="abrirEditarCredito(${i})">✏️</button>
-          <button class="btn btn-green btn-sm" onclick="abrirPlan(${i})">📋 Plan</button>
         </div>
       </div>
       <div class="g3">
@@ -1232,6 +1240,7 @@ function renderCuenta(){
       ${plan.length?`
       <div style="margin-top:10px">
         <div class="card-title" style="margin-bottom:6px">Plan de pagos activo</div>
+        ${(cr.planIncluye&&cr.planIncluye.length)?`<div style="font-size:11px;color:#1a4a8a;background:#eef4fb;border:1px solid #c5d8ee;border-radius:6px;padding:5px 8px;margin-bottom:6px">${cr.planIncluye.length>1?'Convenio que incluye los cr\u00e9ditos':'Incluye el cr\u00e9dito'}: <b>${cr.planIncluye.join(' \u00b7 ')}</b>${cr.planCreadoEl?' \u00b7 creado el '+cr.planCreadoEl:''}</div>`:''}
         <div class="cuota-row-tbl" style="font-weight:600;font-size:10px;color:#888;border-bottom:1px solid #ddd">
           <div>#</div><div>Vencimiento</div><div>Monto</div><div>Estado</div><div></div>
         </div>
@@ -1297,7 +1306,7 @@ function renderCuenta(){
         <div class="card-title" style="margin-bottom:6px;color:#666">Planes anteriores (inhabilitados)</div>
         ${cr.planesAnteriores.map(function(pa,paidx){
           return '<div style="margin-bottom:10px">'+
-            '<div style="font-size:10px;color:#555;margin-bottom:4px">Plan del '+pa.creadoEl+'</div>'+
+            '<div style="font-size:10px;color:#555;margin-bottom:4px">Plan del '+pa.creadoEl+(pa.incluye&&pa.incluye.length?' \u00b7 inclu\u00eda: '+pa.incluye.join(' \u00b7 '):'')+'</div>'+
             '<div class="cuota-row-tbl" style="font-weight:600;font-size:10px;color:#555;border-bottom:1px solid #ccc">'+
               '<div>#</div><div>Vencimiento</div><div>Monto</div><div>Estado</div><div></div>'+
             '</div>'+
@@ -1322,7 +1331,10 @@ function renderCuenta(){
   return `
   <div class="card-hdr" style="margin-bottom:10px">
     <div style="font-size:15px;font-weight:600">Cuenta Corriente</div>
-    <button class="btn btn-dark btn-sm" onclick="abrirNuevoCredito()">+ Crédito</button>
+    <div style="display:flex;gap:6px">
+      ${creds.length?'<button class="btn btn-green btn-sm" onclick="abrirPlan()">📋 Plan</button>':''}
+      <button class="btn btn-dark btn-sm" onclick="abrirNuevoCredito()">+ Crédito</button>
+    </div>
   </div>
   <div class="card" style="background:#EAF3DE;border-color:#C0DD97">
     <div class="fld"><label>Total deuda todos los créditos</label>
@@ -1802,48 +1814,100 @@ function eliminarCredito(){
 }
 
 // -- PLAN PAGOS --
-function abrirPlan(i){
-  creditoActivoIdx=i;
+function abrirPlan(){
+  const creds=(clienteActivo&&clienteActivo.creditos)||[];
+  if(!creds.length){ alert('Primero cargá un crédito'); return; }
   document.getElementById('pl-cuotas').value=3;
   document.getElementById('pl-monto').value='';
   document.getElementById('pl-vto').value=new Date().toISOString().slice(0,10);
   document.getElementById('pl-ant-monto').value='';
   document.getElementById('pl-ant-vto').value='';
+  const f=function(n){return '$'+Math.round(n).toLocaleString('es-AR');};
+  let h='';
+  if(creds.length>1){
+    h+='<label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="pl-todos" checked onchange="plToggleTodos(this.checked)"> Todos los créditos</label>';
+  }
+  creds.forEach(function(cr,i){
+    h+='<label style="display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0;cursor:pointer"><input type="checkbox" class="pl-chk" value="'+i+'" checked onchange="plSyncTodos()"> '+
+      '<span>'+(cr.producto||'Crédito')+' — N° '+(cr.num||'—')+' <span style="color:#888">· '+(cr.entidad||'')+' · capital '+f(parseFloat(cr.capital)||0)+(cr.plan&&cr.plan.length?' · <b style="color:#854F0B">ya tiene plan (se archiva)</b>':'')+'</span></span></label>';
+  });
+  document.getElementById('pl-creds').innerHTML=h;
+  previewReparto();
   document.getElementById('modalPlan').classList.add('open');
+}
+function plToggleTodos(v){
+  document.querySelectorAll('#pl-creds .pl-chk').forEach(function(x){x.checked=v;});
+  previewReparto();
+}
+function plSyncTodos(){
+  const all=document.querySelectorAll('#pl-creds .pl-chk'); const t=document.getElementById('pl-todos');
+  if(t) t.checked=Array.prototype.every.call(all,function(x){return x.checked;});
+  previewReparto();
+}
+function plSeleccion(){
+  return Array.prototype.map.call(document.querySelectorAll('#pl-creds .pl-chk:checked'),function(x){return parseInt(x.value,10);});
+}
+// Reparte "total" entre los créditos elegidos en proporción a su capital (el último absorbe el redondeo)
+function plRepartir(total,idxs){
+  const creds=clienteActivo.creditos;
+  let pesos=idxs.map(function(i){return Math.max(0,parseFloat(creds[i].capital)||0);});
+  let sum=pesos.reduce(function(a,b){return a+b;},0);
+  if(sum<=0){ pesos=idxs.map(function(){return 1;}); sum=idxs.length; }
+  const out=[]; let acum=0;
+  idxs.forEach(function(i,k){
+    let v;
+    if(k===idxs.length-1) v=Math.round((total-acum)*100)/100;
+    else { v=Math.round(total*pesos[k]/sum*100)/100; acum+=v; }
+    out.push(v);
+  });
+  return out;
+}
+function previewReparto(){
+  const el=document.getElementById('pl-reparto'); if(!el) return;
+  const idxs=plSeleccion();
+  const monto=parseFloat(document.getElementById('pl-monto').value)||0;
+  if(idxs.length<=1){ el.textContent=idxs.length?'':'Elegí al menos un crédito.'; return; }
+  const parts=plRepartir(monto,idxs);
+  const creds=clienteActivo.creditos;
+  el.innerHTML='El monto por cuota es el <b>total del convenio</b> y se reparte según el capital de cada crédito'+
+    (monto>0?':<br>'+idxs.map(function(i,k){return (creds[i].num||('crédito '+(i+1)))+': $'+parts[k].toLocaleString('es-AR');}).join(' · '):'.');
 }
 
 function guardarPlan(){
+  const idxs=plSeleccion();
+  if(!idxs.length){ alert('Elegí al menos un crédito'); return; }
   const n=parseInt(document.getElementById('pl-cuotas').value)||1;
   const monto=parseFloat(document.getElementById('pl-monto').value)||0;
   const vto=new Date(document.getElementById('pl-vto').value);
   const antMonto=parseFloat(document.getElementById('pl-ant-monto').value)||0;
   const antVto=document.getElementById('pl-ant-vto').value;
 
-  const plan=[];
-  // Agregar anticipo solo si tiene monto Y vencimiento
-  if(antMonto>0 && antVto){
-    plan.push({vto:antVto, monto:antMonto, pagada:false, esAnticipo:true});
-  }
-  // Agregar cuotas
-  for(let i=0;i<n;i++){
-    const d=new Date(vto);
-    d.setMonth(d.getMonth()+i);
-    plan.push({vto:d.toISOString().slice(0,10),monto,pagada:false});
-  }
+  const cuotasPorCred=plRepartir(monto,idxs);
+  const antPorCred=antMonto>0?plRepartir(antMonto,idxs):idxs.map(function(){return 0;});
 
   const idx=idxClienteActivo();
-  const credito=DB.clientes[idx].creditos[creditoActivoIdx];
-
-  // Archivar plan anterior si existe y tiene cuotas
-  if(credito.plan && credito.plan.length>0){
-    if(!credito.planesAnteriores) credito.planesAnteriores=[];
-    credito.planesAnteriores.push({
-      creadoEl: fmtDMA(new Date()),
-      cuotas: credito.plan
-    });
-  }
-
-  credito.plan=plan;
+  const etiqueta=function(cr,i){ return (cr.producto?cr.producto+' ':'')+'N\u00b0 '+(cr.num||('s/n ('+(i+1)+')')); };
+  const incluye=idxs.map(function(ci){ return etiqueta(DB.clientes[idx].creditos[ci],ci); });
+  idxs.forEach(function(ci,k){
+    const plan=[];
+    if(antMonto>0 && antVto){
+      plan.push({vto:antVto, monto:antPorCred[k], pagada:false, esAnticipo:true});
+    }
+    for(let i=0;i<n;i++){
+      const d=new Date(vto);
+      d.setMonth(d.getMonth()+i);
+      plan.push({vto:d.toISOString().slice(0,10),monto:cuotasPorCred[k],pagada:false});
+    }
+    const credito=DB.clientes[idx].creditos[ci];
+    // Archivar plan anterior si existe y tiene cuotas
+    if(credito.plan && credito.plan.length>0){
+      if(!credito.planesAnteriores) credito.planesAnteriores=[];
+      credito.planesAnteriores.push({ creadoEl: fmtDMA(new Date()), cuotas: credito.plan, incluye: credito.planIncluye||null });
+    }
+    credito.plan=plan;
+    credito.planIncluye=incluye;
+    credito.planCreadoEl=fmtDMA(new Date());
+  });
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);cerrarModal('modalPlan');setTabAdmin('cuenta');
 }
@@ -2204,6 +2268,7 @@ function renderConsultas(){
     <div class="tb active" onclick="setTabConsulta('contacto',this)">&#128222; Último contacto</div>
     
     <div class="tb" onclick="setTabConsulta('comercios',this)">&#127981; Comercios</div>
+    <div class="tb" onclick="abrirSubdiario()" title="Subdiario de pagos">&#128209; Subdiario</div>
   </div>
   <div class="tabcontent" id="consultaContent"></div>`;
   renderConsultaContacto();
