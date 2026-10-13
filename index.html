@@ -1222,6 +1222,7 @@ function renderCuenta(){
   const crList=creds.map((cr,i)=>{
     const plan=cr.plan||[];
     const pagadas=plan.filter(p=>p.pagada).length;
+    const miembroDe=(cr.planEnCredito&&!plan.length)?creds.find(function(x){return x.cid===cr.planEnCredito;}):null;
     return `
     <div class="card" style="border-left:3px solid ${i%2===0?'#4a8a1a':'#1a4a8a'}">
       <div class="card-hdr">
@@ -1235,12 +1236,13 @@ function renderCuenta(){
       </div>
       <div class="g3">
         <div class="fld"><label>Capital adeudado</label><div class="v">$${parseFloat(cr.capital||0).toLocaleString('es-AR')}</div></div>
-        <div class="fld"><label>Plan de pagos</label><div class="v">${plan.length?`${pagadas}/${plan.length} cuotas pagadas`:'Sin plan'}</div></div>
+        <div class="fld"><label>Plan de pagos</label><div class="v">${plan.length?`${pagadas}/${plan.length} cuotas pagadas`:(miembroDe?'Incluido en plan refinanciado':'Sin plan')}</div></div>
       </div>
+      ${miembroDe?`<div style="margin-top:10px;font-size:12px;color:#1a4a8a;background:#eef4fb;border:1px solid #c5d8ee;border-radius:6px;padding:8px 10px">&#128279; Este cr\u00e9dito est\u00e1 incluido en el plan refinanciado cargado en el cr\u00e9dito <b>${(miembroDe.producto?miembroDe.producto+' ':'')+'N\u00b0 '+(miembroDe.num||'s/n')}</b>. Los pagos se registran all\u00ed.</div>`:''}
       ${plan.length?`
       <div style="margin-top:10px">
         <div class="card-title" style="margin-bottom:6px">Plan de pagos activo</div>
-        ${(cr.planIncluye&&cr.planIncluye.length)?`<div style="font-size:11px;color:#1a4a8a;background:#eef4fb;border:1px solid #c5d8ee;border-radius:6px;padding:5px 8px;margin-bottom:6px">${cr.planIncluye.length>1?'Convenio que incluye los cr\u00e9ditos':'Incluye el cr\u00e9dito'}: <b>${cr.planIncluye.join(' \u00b7 ')}</b>${cr.planCreadoEl?' \u00b7 creado el '+cr.planCreadoEl:''}</div>`:''}
+        ${(cr.planIncluye&&cr.planIncluye.length)?`<div style="font-size:11px;color:#1a4a8a;background:#eef4fb;border:1px solid #c5d8ee;border-radius:6px;padding:5px 8px;margin-bottom:6px">${cr.planIncluye.length>1?'Convenio que incluye los cr\u00e9ditos':'Incluye el cr\u00e9dito'}: <b>${cr.planIncluye.join(' \u00b7 ')}</b>${cr.planCapital&&cr.planIncluye.length>1?' \u00b7 capital incluido $'+Math.round(cr.planCapital).toLocaleString('es-AR'):''}${cr.planCreadoEl?' \u00b7 creado el '+cr.planCreadoEl:''}</div>`:''}
         <div class="cuota-row-tbl" style="font-weight:600;font-size:10px;color:#888;border-bottom:1px solid #ddd">
           <div>#</div><div>Vencimiento</div><div>Monto</div><div>Estado</div><div></div>
         </div>
@@ -1847,31 +1849,19 @@ function plSyncTodos(){
 function plSeleccion(){
   return Array.prototype.map.call(document.querySelectorAll('#pl-creds .pl-chk:checked'),function(x){return parseInt(x.value,10);});
 }
-// Reparte "total" entre los créditos elegidos en proporción a su capital (el último absorbe el redondeo)
-function plRepartir(total,idxs){
-  const creds=clienteActivo.creditos;
-  let pesos=idxs.map(function(i){return Math.max(0,parseFloat(creds[i].capital)||0);});
-  let sum=pesos.reduce(function(a,b){return a+b;},0);
-  if(sum<=0){ pesos=idxs.map(function(){return 1;}); sum=idxs.length; }
-  const out=[]; let acum=0;
-  idxs.forEach(function(i,k){
-    let v;
-    if(k===idxs.length-1) v=Math.round((total-acum)*100)/100;
-    else { v=Math.round(total*pesos[k]/sum*100)/100; acum+=v; }
-    out.push(v);
-  });
-  return out;
-}
 function previewReparto(){
   const el=document.getElementById('pl-reparto'); if(!el) return;
   const idxs=plSeleccion();
-  const monto=parseFloat(document.getElementById('pl-monto').value)||0;
-  if(idxs.length<=1){ el.textContent=idxs.length?'':'Elegí al menos un crédito.'; return; }
-  const parts=plRepartir(monto,idxs);
+  if(!idxs.length){ el.textContent='Elegí al menos un crédito.'; return; }
+  if(idxs.length===1){ el.textContent=''; return; }
   const creds=clienteActivo.creditos;
-  el.innerHTML='El monto por cuota es el <b>total del convenio</b> y se reparte según el capital de cada crédito'+
-    (monto>0?':<br>'+idxs.map(function(i,k){return (creds[i].num||('crédito '+(i+1)))+': $'+parts[k].toLocaleString('es-AR');}).join(' · '):'.');
+  const cap=idxs.reduce(function(t,i){return t+(parseFloat(creds[i].capital)||0);},0);
+  el.innerHTML='Se crea <b>un único plan refinanciado</b> por los montos que ingreses abajo (sin repartir por crédito). '+
+    'Queda cargado en el crédito <b>N° '+(creds[idxs[0]].num||(idxs[0]+1))+'</b> y los demás créditos figuran como incluidos en ese plan. '+
+    'Capital total incluido: <b>$'+cap.toLocaleString('es-AR')+'</b>.';
 }
+
+function plNuevoCid(){ return 'cr_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
 function guardarPlan(){
   const idxs=plSeleccion();
@@ -1882,32 +1872,45 @@ function guardarPlan(){
   const antMonto=parseFloat(document.getElementById('pl-ant-monto').value)||0;
   const antVto=document.getElementById('pl-ant-vto').value;
 
-  const cuotasPorCred=plRepartir(monto,idxs);
-  const antPorCred=antMonto>0?plRepartir(antMonto,idxs):idxs.map(function(){return 0;});
+  const plan=[];
+  if(antMonto>0 && antVto){ plan.push({vto:antVto, monto:antMonto, pagada:false, esAnticipo:true}); }
+  for(let i=0;i<n;i++){
+    const d=new Date(vto);
+    d.setMonth(d.getMonth()+i);
+    plan.push({vto:d.toISOString().slice(0,10),monto,pagada:false});
+  }
 
   const idx=idxClienteActivo();
+  const creds=DB.clientes[idx].creditos;
+  creds.forEach(function(cr){ if(!cr.cid) cr.cid=plNuevoCid(); });
   const etiqueta=function(cr,i){ return (cr.producto?cr.producto+' ':'')+'N\u00b0 '+(cr.num||('s/n ('+(i+1)+')')); };
-  const incluye=idxs.map(function(ci){ return etiqueta(DB.clientes[idx].creditos[ci],ci); });
-  idxs.forEach(function(ci,k){
-    const plan=[];
-    if(antMonto>0 && antVto){
-      plan.push({vto:antVto, monto:antPorCred[k], pagada:false, esAnticipo:true});
+  const hoyTxt=fmtDMA(new Date());
+  const principal=creds[idxs[0]];
+  const incluye=idxs.map(function(ci){ return etiqueta(creds[ci],ci); });
+  const capital=idxs.reduce(function(t,ci){return t+(parseFloat(creds[ci].capital)||0);},0);
+
+  // Los créditos que antes dependían de un plan de alguno de los elegidos quedan libres
+  const idsElegidos=idxs.map(function(ci){return creds[ci].cid;});
+  creds.forEach(function(cr){ if(cr.planEnCredito && idsElegidos.indexOf(cr.planEnCredito)>=0){ cr.planEnCredito=null; } });
+
+  // Archivar el plan anterior de cada crédito elegido (si tenía cuotas)
+  idxs.forEach(function(ci){
+    const cr=creds[ci];
+    if(cr.plan && cr.plan.length>0){
+      if(!cr.planesAnteriores) cr.planesAnteriores=[];
+      cr.planesAnteriores.push({ creadoEl: hoyTxt, cuotas: cr.plan, incluye: cr.planIncluye||null });
     }
-    for(let i=0;i<n;i++){
-      const d=new Date(vto);
-      d.setMonth(d.getMonth()+i);
-      plan.push({vto:d.toISOString().slice(0,10),monto:cuotasPorCred[k],pagada:false});
+    if(ci!==idxs[0]){
+      cr.plan=[]; cr.planIncluye=null; cr.planCapital=null; cr.planCreadoEl=null;
+      cr.planEnCredito=principal.cid;
     }
-    const credito=DB.clientes[idx].creditos[ci];
-    // Archivar plan anterior si existe y tiene cuotas
-    if(credito.plan && credito.plan.length>0){
-      if(!credito.planesAnteriores) credito.planesAnteriores=[];
-      credito.planesAnteriores.push({ creadoEl: fmtDMA(new Date()), cuotas: credito.plan, incluye: credito.planIncluye||null });
-    }
-    credito.plan=plan;
-    credito.planIncluye=incluye;
-    credito.planCreadoEl=fmtDMA(new Date());
   });
+  principal.plan=plan;
+  principal.planEnCredito=null;
+  principal.planIncluye=incluye;
+  principal.planCapital=capital;
+  principal.planCreadoEl=hoyTxt;
+
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);cerrarModal('modalPlan');setTabAdmin('cuenta');
 }
