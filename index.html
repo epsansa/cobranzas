@@ -485,6 +485,29 @@ window.saveMuchos = async function(clientes, config){
   }
 };
 
+window.borrarMuchos = async function(ids){
+  const BSIZ=450;
+  try{
+    for(let i=0;i<ids.length;i+=BSIZ){
+      const b=writeBatch(db_fs);
+      ids.slice(i,i+BSIZ).forEach(function(id){ b.delete(doc(db_fs,"clientes",id)); });
+      await b.commit();
+      actualizarIndicador("guardando",Math.min(i+BSIZ,ids.length)+"/"+ids.length);
+    }
+    const set=new Set(ids);
+    window.DB.clientes=window.DB.clientes.filter(function(c){return !set.has(c.id);});
+    ids.forEach(function(id){ window._eliminarClienteDeCache(id); });
+    window._fbLastSave=new Date();
+    actualizarIndicador("ok");
+    return true;
+  }catch(e){
+    console.error("[borrarMuchos]",e);
+    mostrarError("Error: "+e.message);
+    actualizarIndicador("error");
+    return false;
+  }
+};
+
 window._fbActualizarIndicador=actualizarIndicador;
 
 // Exponer al scope global lo que necesita el segundo <script> (sin type="module"),
@@ -634,7 +657,7 @@ a{color:inherit;text-decoration:none}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.10.2</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.10.4</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -2728,6 +2751,7 @@ window.confirmarImport = async function(){
   // Deduplicar contra clientes existentes por DNI
   const nuevos=[];
   const modificados=[];
+  let encontrados=0; const ejemplos=[];
   n.forEach(function(nuevo){
     const dniNorm=(nuevo.dni||'').replace(/[.]/g,'').trim();
     if(!dniNorm){ nuevos.push(nuevo); return; }
@@ -2735,6 +2759,8 @@ window.confirmarImport = async function(){
     if(!existente){
       nuevos.push(nuevo);
     } else {
+      encontrados++;
+      if(ejemplos.length<3) ejemplos.push({n:existente.nombre,dni:existente.dni,sis:(existente.telefonos||[]).slice(),arch:(nuevo.telefonos||[]).slice(),cred:(existente.creditos||[]).length,credArch:(nuevo.creditos||[]).length});
       // Fusionar creditos nuevos que no existan
       var credsMod=false;
       (nuevo.creditos||[]).forEach(function(cr){
@@ -2766,7 +2792,11 @@ window.confirmarImport = async function(){
   }
   if(ok){ 
     renderLista(); 
-    document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; '+nuevos.length+' clientes nuevos importados'+(modificados.length?' · '+modificados.length+' clientes actualizados':'')+'</strong></div>'; 
+    const esc=function(x){return String(x===undefined||x===null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;');};
+    document.getElementById('imp-preview').innerHTML='<div style="background:#EAF3DE;border-radius:8px;padding:12px;color:#27500A"><strong>&#10003; '+nuevos.length+' clientes nuevos importados'+(modificados.length?' · '+modificados.length+' clientes actualizados':'')+'</strong>'+
+      '<div style="font-size:11px;margin-top:6px;color:#3a5a1a">Diagn\u00f3stico: base consultada '+universoImp.length+' clientes · del archivo, '+encontrados+' ya estaban en la base · '+(encontrados-modificados.length)+' sin cambios (ya ten\u00edan todo)</div>'+
+      (ejemplos.length?'<div style="font-size:11px;margin-top:4px;color:#3a5a1a">'+ejemplos.map(function(e){return esc(e.n)+' ('+esc(e.dni)+'): en el sistema tel='+esc(JSON.stringify(e.sis))+' \u00b7 en el archivo tel='+esc(JSON.stringify(e.arch))+' \u00b7 cr\u00e9ditos '+e.cred+'/'+e.credArch;}).join('<br>')+'</div>':'')+
+      '</div>'; 
   }
   window._importTemp=null;
 };
@@ -3105,103 +3135,117 @@ function aplicarImportTelTramites(){
 // ═══════════════════════════════════════════════════
 // MANTENIMIENTO — Renombrado masivo de carteras
 // ═══════════════════════════════════════════════════
-function renderLimpiarDuplicados(){
+// ===== LIMPIAR DUPLICADOS (por DNI, sobre TODA la base) =====
+function _dniNorm(c){ return String(c.dni===undefined||c.dni===null?'':c.dni).replace(/[.\s]/g,'').trim(); }
+function _puntajeCliente(c){
+  let p=0;
+  p+=(c.tramites||[]).length*100;
+  if(c.obs&&String(c.obs).trim()) p+=50;
+  p+=(c.creditos||[]).filter(function(x){return x.plan&&x.plan.length;}).length*60;
+  p+=(c.creditos||[]).length*5;
+  p+=(c.telefonos||[]).length*2;
+  p+=JSON.stringify(c).length/10000;
+  return p;
+}
+function _gruposDuplicados(universo){
+  const m={};
+  universo.forEach(function(c){ const d=_dniNorm(c); if(!d) return; (m[d]=m[d]||[]).push(c); });
+  return Object.values(m).filter(function(arr){return arr.length>1;});
+}
+async function renderLimpiarDuplicados(){
   const el=document.getElementById('herrContent');
-  // Buscar duplicados por DNI
-  const dniCount={};
-  DB.clientes.forEach(function(c){
-    const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni) return;
-    if(!dniCount[dni]) dniCount[dni]=[];
-    dniCount[dni].push(c);
-  });
-  const duplicados=Object.values(dniCount).filter(function(arr){ return arr.length>1; });
+  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px">Revisando toda la base...</div></div>';
+  let universo;
+  try{ universo=await window.obtenerTodosClientes(); }catch(e){ el.innerHTML='<div class="card" style="color:#a32d2d">No se pudo leer la base: '+e.message+'</div>'; return; }
+  const duplicados=_gruposDuplicados(universo);
   const total=duplicados.reduce(function(s,arr){ return s+(arr.length-1); },0);
-  
   if(!duplicados.length){
     el.innerHTML='<div class="card"><div class="card-title" style="margin-bottom:12px">Limpiar duplicados</div>'+
-      '<div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">&#10003; No se encontraron clientes duplicados en la base.</div></div>';
+      '<div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A;font-size:13px">&#10003; No se encontraron clientes duplicados en la base ('+universo.length+' clientes revisados).</div></div>';
     return;
   }
-
   el.innerHTML='<div class="card">'+
     '<div class="card-hdr"><div class="card-title">Limpiar duplicados</div>'+
-    '<button class="btn btn-dark btn-sm" onclick="ejecutarLimpiezaDuplicados()">&#128465; Eliminar '+total+' duplicados</button></div>'+
+    '<button class="btn btn-dark btn-sm" onclick="ejecutarLimpiezaDuplicados()">&#128465; Unificar y eliminar '+total+' duplicados</button></div>'+
     '<div style="background:#FAEEDA;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:#633806">'+
-    '<strong>&#9888; Se encontraron '+duplicados.length+' DNI con registros duplicados ('+total+' extras a eliminar).</strong><br>'+
-    'Se conservar&aacute; el registro con m&aacute;s datos y se fusionar&aacute;n los cr&eacute;ditos &uacute;nicos.'+
+    '<strong>&#9888; Se encontraron '+duplicados.length+' DNI con registros repetidos ('+total+' copias de m&aacute;s). Base revisada: '+universo.length+' clientes.</strong><br>'+
+    'Se conserva el registro con m&aacute;s gesti&oacute;n cargada (tr&aacute;mites, observaci&oacute;n, planes) y se le suman los tel&eacute;fonos, mails, cr&eacute;ditos, tr&aacute;mites y observaci&oacute;n de las otras copias. '+
+    'Antes de borrar se descarga un archivo de respaldo con las copias originales.'+
     '</div>'+
-    '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>DNI</th><th>Nombre</th><th>Copias</th><th>Entidades</th></tr></thead><tbody>'+
+    '<div style="overflow-x:auto"><table class="tbl"><thead><tr><th>DNI</th><th>Nombre</th><th>Copias</th><th>Tel&eacute;fonos por copia</th></tr></thead><tbody>'+
     duplicados.slice(0,50).map(function(arr){
-      const ents=[...new Set(arr.flatMap(function(c){ return (c.creditos||[]).map(function(cr){ return cr.entidad||c.entidad||''; }); }).filter(Boolean))].join(', ');
-      return '<tr><td>'+arr[0].dni+'</td><td>'+arr[0].nombre+'</td><td>'+arr.length+'</td><td>'+ents+'</td></tr>';
+      return '<tr><td>'+arr[0].dni+'</td><td>'+(arr[0].nombre||'')+'</td><td>'+arr.length+'</td><td>'+arr.map(function(c){return (c.telefonos||[]).length;}).join(' / ')+'</td></tr>';
     }).join('')+
     (duplicados.length>50?'<tr><td colspan="4" style="color:#888;text-align:center">... y '+(duplicados.length-50)+' m&aacute;s</td></tr>':'')+
     '</tbody></table></div></div>';
 }
 
 async function ejecutarLimpiezaDuplicados(){
-  if(!confirm('Eliminar duplicados y fusionar créditos. ¿Confirmás?')) return;
+  if(!confirm('Se van a unificar los clientes repetidos y borrar las copias de más. Antes se descarga un respaldo. ¿Confirmás?')) return;
   const el=document.getElementById('herrContent');
+  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px">Preparando...</div></div>';
+  let universo;
+  try{ universo=await window.obtenerTodosClientes(); }catch(e){ el.innerHTML='<div class="card" style="color:#a32d2d">No se pudo leer la base: '+e.message+'</div>'; return; }
+  const grupos=_gruposDuplicados(universo);
+  if(!grupos.length){ renderLimpiarDuplicados(); return; }
 
-  const dniMap={};
-  DB.clientes.forEach(function(c){
-    const dni=(c.dni||'').replace(/[.]/g,'').trim();
-    if(!dni) return;
-    if(!dniMap[dni]) dniMap[dni]=[];
-    dniMap[dni].push(c);
-  });
+  // Respaldo de las copias originales (antes de tocar nada)
+  try{
+    const resp={fecha:new Date().toISOString(),grupos:JSON.parse(JSON.stringify(grupos))};
+    const blob=new Blob([JSON.stringify(resp)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='respaldo_duplicados_'+new Date().toISOString().slice(0,16).replace(/[-:T]/g,'')+'.json';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
+  }catch(e){ if(!confirm('No se pudo generar el respaldo. ¿Continuar igual?')) { renderLimpiarDuplicados(); return; } }
 
-  const aEliminar=[];
-  const aModificar=[];
-  Object.values(dniMap).forEach(function(arr){
-    if(arr.length<=1) return;
-    arr.sort(function(a,b){ return JSON.stringify(b).length-JSON.stringify(a).length; });
-    const principal=arr[0];
-    arr.slice(1).forEach(function(dup){
-      (dup.creditos||[]).forEach(function(cr){
-        const yaExiste=(principal.creditos||[]).some(function(e){ return e.num&&cr.num&&e.num===cr.num; });
-        if(!yaExiste){ if(!principal.creditos) principal.creditos=[]; principal.creditos.push(cr); }
+  const digitos=function(x){return String(x).replace(/\D/g,'');};
+  const aEliminar=[], aGuardar=[];
+  grupos.forEach(function(arr){
+    arr.sort(function(a,b){ return _puntajeCliente(b)-_puntajeCliente(a); });
+    const P=arr[0];
+    arr.slice(1).forEach(function(D){
+      // créditos (por número); si el principal no tiene plan y la copia sí, se trae el plan
+      if(!P.creditos) P.creditos=[];
+      (D.creditos||[]).forEach(function(cr){
+        const ex=cr.num?P.creditos.find(function(e){return e.num&&e.num===cr.num;}):null;
+        if(!ex){ P.creditos.push(cr); }
+        else if(!(ex.plan&&ex.plan.length) && cr.plan&&cr.plan.length){
+          ['plan','planesAnteriores','planIncluye','planCapital','planCreadoEl','planEnCredito','cid'].forEach(function(k){ if(cr[k]!==undefined) ex[k]=cr[k]; });
+        }
       });
-      (dup.telefonos||[]).forEach(function(t){ if(t&&!(principal.telefonos||[]).includes(t)){ if(!principal.telefonos) principal.telefonos=[]; principal.telefonos.push(t); } });
-      aEliminar.push(dup.id);
+      // teléfonos / mails
+      const yaT=(P.telefonos||[]).map(digitos); if(!P.telefonos) P.telefonos=[];
+      (D.telefonos||[]).forEach(function(t){ const d=digitos(t); if(d && yaT.indexOf(d)<0){ P.telefonos.push(t); yaT.push(d); } });
+      const yaM=(P.mails||[]).map(function(x){return String(x).toLowerCase();}); if(!P.mails) P.mails=[];
+      (D.mails||[]).forEach(function(m){ if(m && yaM.indexOf(String(m).toLowerCase())<0){ P.mails.push(m); yaM.push(String(m).toLowerCase()); } });
+      // WhatsApp marcados
+      if(D.telsWsp&&D.telsWsp.length){ if(!P.telsWsp) P.telsWsp=[]; D.telsWsp.forEach(function(t){ if(P.telsWsp.indexOf(t)<0) P.telsWsp.push(t); }); }
+      // trámites
+      if(D.tramites&&D.tramites.length){
+        if(!P.tramites) P.tramites=[];
+        const claves=P.tramites.map(function(t){return (t.fechaHora||'')+'|'+(t.nota||'');});
+        D.tramites.forEach(function(t){ const k=(t.fechaHora||'')+'|'+(t.nota||''); if(claves.indexOf(k)<0){ P.tramites.push(t); claves.push(k); } });
+      }
+      // observación y datos personales si al principal le faltan
+      if(!(P.obs&&String(P.obs).trim()) && D.obs&&String(D.obs).trim()){ P.obs=D.obs; P.obsFecha=D.obsFecha||null; }
+      ['domicilio','localidad','cp','estado','entidad','cartera'].forEach(function(k){ if(!P[k] && D[k]) P[k]=D[k]; });
+      aEliminar.push(D.id);
     });
-    aModificar.push(principal);
+    aGuardar.push(P);
   });
 
-  DB.clientes=DB.clientes.filter(function(c){ return !aEliminar.includes(c.id); });
-
-  const total=aEliminar.length+aModificar.length;
-  let procesados=0;
-
-  function prog(txt){
-    procesados++;
-    const pct=Math.round(procesados/total*100);
-    el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px 16px">'+txt+' ('+procesados+'/'+total+')</div>'+
-      '<div style="background:#dce8f5;border-radius:4px;height:10px;margin:0 16px 16px"><div style="background:#2557a7;border-radius:4px;height:10px;width:'+pct+'%"></div></div></div>';
-  }
-
-  // Guardar modificados de a uno con pausa cada 10
-  for(var i=0;i<aModificar.length;i++){
-    await window.saveDB(aModificar[i]);
-    prog('Actualizando clientes');
-    if(i%10===9) await new Promise(function(r){setTimeout(r,100);});
-  }
-
-  // Eliminar duplicados de a uno con pausa cada 50
-  for(var i=0;i<aEliminar.length;i++){
-    if(typeof window.deleteClienteDB==='function') await window.deleteClienteDB(aEliminar[i]);
-    prog('Eliminando duplicados');
-    if(i%50===49) await new Promise(function(r){setTimeout(r,200);});
-  }
-
-  try{ localStorage.setItem('epsan_v3',JSON.stringify({entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios,estados:DB.estados,clientes:DB.clientes})); }catch(e){}
+  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px 16px" data-progreso>Guardando '+aGuardar.length+' clientes unificados...</div></div>';
+  const ok1=await window.saveMuchos(aGuardar,false);
+  if(!ok1){ el.innerHTML='<div class="card" style="color:#a32d2d;padding:12px">No se pudieron guardar los clientes unificados. No se borró nada. Reintentá.</div>'; return; }
+  el.innerHTML='<div class="card"><div style="color:#2557a7;padding:12px 16px">Eliminando '+aEliminar.length+' copias...</div></div>';
+  const ok2=await window.borrarMuchos(aEliminar);
   renderLista();
+  if(!ok2){ el.innerHTML='<div class="card" style="color:#a32d2d;padding:12px">Se unificaron los datos pero falló el borrado de copias. Volvé a abrir "Limpiar duplicados" y repetí.</div>'; return; }
   el.innerHTML='<div class="card"><div style="background:#EAF3DE;border-radius:8px;padding:14px;color:#27500A">'+
-    '<strong>✓ Limpieza completada</strong><br>'+aEliminar.length+' duplicados eliminados. '+aModificar.length+' clientes fusionados.</div>'+
+    '<strong>&#10003; Limpieza completada</strong><br>'+aEliminar.length+' copias eliminadas · '+aGuardar.length+' clientes unificados.</div>'+
     '<div class="btn-row" style="margin-top:12px"><button class="btn btn-outline" onclick="renderLimpiarDuplicados()">Verificar nuevamente</button></div></div>';
 }
-  
+
 function renderMantenimiento(){
   const el=document.getElementById('herrContent');
   const reglas=[
