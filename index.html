@@ -233,7 +233,7 @@ window.importarMasivo=async function(clientes,reemplazar){
     await setDoc(CONFIG_REF,{entidades:window.DB.entidades||[],carteras:window.DB.carteras||[],comercios:window.DB.comercios||[],estados:window.DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"],ts:serverTimestamp()});
     try{ localStorage.setItem('epsan_v3',JSON.stringify(window.DB)); }catch(e){}
     // Actualizar la caché con lo que ya sabemos, en vez de tirarla entera (evita un refetch innecesario)
-    _IDB.limpiar(); // la próxima vez se vuelve a bajar todo completo
+    if(reemplazar) _IDB.limpiar(); // si se reemplazó toda la base, la próxima vez se baja completa; si solo se agregó, alcanza con la sincronización incremental
     if(reemplazar){ window._todosClientesCache = clientes.slice(); }
     else if(window._todosClientesCache){ window._todosClientesCache = window._todosClientesCache.concat(clientes); }
     window._fbLastSave=new Date(); window._fbSaving=false; actualizarIndicador('ok');
