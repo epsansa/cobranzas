@@ -2577,6 +2577,36 @@ function renderImportar(){
   </div>`;
 }
 
+// Limpia una lista de teléfonos del archivo: saca vacíos, ceros y repetidos
+function limpiarTelsImport(arr){
+  const out=[];
+  (arr||[]).forEach(function(v){
+    let t=String(v===null||v===undefined?'':v).trim();
+    if(/^\d+\.0+$/.test(t)) t=t.replace(/\.0+$/,'');   // 1122368661.0 -> 1122368661
+    if(!t || /^[0\s.\-]+$/.test(t)) return;          // vacío o solo ceros
+    if(out.indexOf(t)<0) out.push(t);
+  });
+  return out;
+}
+function limpiarMailsImport(arr){
+  const out=[];
+  (arr||[]).forEach(function(v){
+    const t=String(v===null||v===undefined?'':v).trim();
+    if(t && out.map(function(x){return x.toLowerCase();}).indexOf(t.toLowerCase())<0) out.push(t);
+  });
+  return out;
+}
+// Convierte una celda de Excel a texto; las fechas pasan a aaaa-mm-dd (sin ambigüedad día/mes)
+function valorCeldaImport(v){
+  if(v===null||v===undefined) return '';
+  if(v instanceof Date){
+    if(isNaN(v)) return '';
+    const d=new Date(v.getTime()+12*3600*1000); // +12h: evita corrimientos de zona horaria
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  return String(v).trim();
+}
+
 function importarArchivo(e){
   const file=e.target.files[0]; if(!file) return;
   const reader=new FileReader();
@@ -2588,21 +2618,38 @@ function importarArchivo(e){
         const headers=lines[0].split(',').map(h=>h.trim().toLowerCase().replace(/[^a-z]/g,''));
         for(let i=1;i<lines.length;i++){
           const vals=lines[i].split(',');
-          const obj={};
-          headers.forEach((h,j)=>obj[h]=(vals[j]||'').trim());
+          const obj={_tels:[],_mails:[]};
+          headers.forEach((h,j)=>{
+            const v=(vals[j]||'').trim();
+            if(/^(tel|cel|whats)/.test(h)) obj._tels.push(v);
+            else if(/^(mail|email|correo)/.test(h)) obj._mails.push(v);
+            if(!(h in obj) || v) obj[h]=v;
+          });
           rows.push(obj);
         }
       } else {
-        const wb=XLSX.read(ev.target.result,{type:'binary'});
+        const wb=XLSX.read(ev.target.result,{type:'binary',cellDates:true});
         const ws=wb.Sheets[wb.SheetNames[0]];
-        const data=XLSX.utils.sheet_to_json(ws,{raw:false});
-        rows=data.map(r=>{const obj={};Object.keys(r).forEach(k=>obj[k.toLowerCase().trim().replace(/[^a-z]/g,'')]=String(r[k]||'').trim());return obj;});
+        const data=XLSX.utils.sheet_to_json(ws,{raw:true});
+        rows=data.map(r=>{
+          const obj={_tels:[],_mails:[]};
+          Object.keys(r).forEach(k=>{
+            const h=k.toLowerCase().trim().replace(/[^a-z]/g,'');
+            const v=valorCeldaImport(r[k]);
+            // columnas repetidas (ej. dos "telefono"): se juntan todas, no se pisan
+            if(/^(tel|cel|whats)/.test(h)) obj._tels.push(v);
+            else if(/^(mail|email|correo)/.test(h)) obj._mails.push(v);
+            if(!(h in obj) || v) obj[h]=v;
+          });
+          return obj;
+        });
       }
       // Agrupar por DNI
       const mapa={};
       rows.forEach(r=>{
         const dni=(r.dni||'').trim();
         const key=dni||r.nombre||Math.random();
+        const yaEstaba=!!mapa[key];
         if(!mapa[key]){
           mapa[key]={
             id:'c_'+Date.now()+'_'+Math.random().toString(36).slice(2),
@@ -2610,10 +2657,15 @@ function importarArchivo(e){
             domicilio:r.domicilio||'',localidad:r.localidad||'',cp:r.cp||'',
             entidad:r.entidad||'',cartera:r.cartera||'',
             estado:r.estado||'Pendiente',
-            telefonos:r.telefono?[r.telefono]:[],
-            mails:r.mail?[r.mail]:[],
+            telefonos:limpiarTelsImport(r._tels&&r._tels.length?r._tels:[r.telefono]),
+            mails:limpiarMailsImport(r._mails&&r._mails.length?r._mails:[r.mail]),
             creditos:[],tramites:[],obs:''
           };
+        }
+        if(yaEstaba){
+          // mismo cliente en otra fila (otro crédito): sumar teléfonos / mails nuevos
+          mapa[key].telefonos=limpiarTelsImport(mapa[key].telefonos.concat(r._tels&&r._tels.length?r._tels:[r.telefono]));
+          mapa[key].mails=limpiarMailsImport(mapa[key].mails.concat(r._mails&&r._mails.length?r._mails:[r.mail]));
         }
         if(r.credito||r.capital||r.producto){
           mapa[key].creditos.push({
@@ -2668,13 +2720,18 @@ window.confirmarImport = async function(){
   const n=window._importTemp||[];
   if(!n.length){alert('No hay datos para importar');return;}
   extraerDatosImport(n);
+  // Buscar contra TODA la base (no solo los clientes cargados en pantalla)
+  let universoImp=DB.clientes;
+  try{ universoImp=await window.obtenerTodosClientes(); }catch(e){ console.warn('No se pudo cargar toda la base para deduplicar',e); }
+  const porDni=new Map();
+  universoImp.forEach(function(c){ const k=(c.dni||'').toString().replace(/[.]/g,'').trim(); if(k) porDni.set(k,c); });
   // Deduplicar contra clientes existentes por DNI
   const nuevos=[];
   const modificados=[];
   n.forEach(function(nuevo){
     const dniNorm=(nuevo.dni||'').replace(/[.]/g,'').trim();
     if(!dniNorm){ nuevos.push(nuevo); return; }
-    const existente=DB.clientes.find(function(c){ return (c.dni||'').replace(/[.]/g,'').trim()===dniNorm; });
+    const existente=porDni.get(dniNorm);
     if(!existente){
       nuevos.push(nuevo);
     } else {
@@ -2686,16 +2743,26 @@ window.confirmarImport = async function(){
         });
         if(!yaExiste){ if(!existente.creditos) existente.creditos=[]; existente.creditos.push(cr); credsMod=true; }
       });
-      if(credsMod) modificados.push(existente);
+      // Completar teléfonos y mails que falten (sin repetir los que ya tiene)
+      const telsAntes=(existente.telefonos||[]).length, mailsAntes=(existente.mails||[]).length;
+      const yaTel=(existente.telefonos||[]).map(function(x){return String(x).replace(/\D/g,'');});
+      (nuevo.telefonos||[]).forEach(function(t){
+        const d=String(t).replace(/\D/g,'');
+        if(d && yaTel.indexOf(d)<0){ if(!existente.telefonos) existente.telefonos=[]; existente.telefonos.push(t); yaTel.push(d); }
+      });
+      const yaMail=(existente.mails||[]).map(function(x){return String(x).toLowerCase();});
+      (nuevo.mails||[]).forEach(function(m){
+        if(yaMail.indexOf(String(m).toLowerCase())<0){ if(!existente.mails) existente.mails=[]; existente.mails.push(m); yaMail.push(String(m).toLowerCase()); }
+      });
+      const contactoMod=((existente.telefonos||[]).length!==telsAntes)||((existente.mails||[]).length!==mailsAntes);
+      if(credsMod||contactoMod) modificados.push(existente);
     }
   });
   // Guardar nuevos + modificados
-  const todosAGuardar=[...nuevos];
-  DB.clientes=[...DB.clientes,...nuevos];
-  const ok=await window.importarMasivo(nuevos,false);
+  const ok=await window.importarMasivo(nuevos,false); // importarMasivo ya agrega a DB.clientes y a la caché
   // Guardar modificados por separado
   if(modificados.length && ok){
-    for(var i=0;i<modificados.length;i++){ await window.saveDB(modificados[i]); }
+    await window.saveMuchos(modificados,false); // guardado en lotes: confiable para muchos clientes a la vez
   }
   if(ok){ 
     renderLista(); 
