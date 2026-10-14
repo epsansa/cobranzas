@@ -657,7 +657,7 @@ a{color:inherit;text-decoration:none}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.10.4</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.10.5</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1438,6 +1438,23 @@ function renderCuenta(){
   ${generarSeccionDS(c)}`;
 }
 
+// Créditos que entran al cálculo de deuda, con su posición real en c.creditos
+function _dsItems(c){
+  var ENT=['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'];
+  var todos=(c.creditos||[]).map(function(cr,i){return {cr:cr,i:i};});
+  var f=todos.filter(function(it){return (it.cr.entidad||'').toUpperCase().split(' ').some(function(p){return ENT.indexOf(p)>=0;});});
+  return f.length?f:todos;
+}
+function dsToggleTodos(v){
+  document.querySelectorAll('.ds-chk').forEach(function(x){x.checked=v;});
+  dsCambioSel();
+}
+function dsCambioSel(){
+  var all=document.querySelectorAll('.ds-chk'), t=document.getElementById('ds-todos');
+  if(t) t.checked=Array.prototype.every.call(all,function(x){return x.checked;});
+  var r=document.getElementById('ds-resultado');
+  if(r && r.innerHTML.trim()) calcDS(); // si ya había un cálculo, se actualiza solo
+}
 function generarSeccionDS(c){
   var esDS=(c.creditos||[]).some(function(cr){return (cr.entidad||'').toUpperCase().split(' ').some(function(p){return ['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'].indexOf(p)>=0;});})
     ||(c.entidad||'').toUpperCase().split(' ').some(function(p){return ['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'].indexOf(p)>=0;});
@@ -1448,12 +1465,16 @@ function generarSeccionDS(c){
   html+='<div class="fld" style="flex:1"><label>Tasa punitoria mensual (%)</label><input type="number" id="ds-tasa" value="15" step="0.5" style="width:100%;padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none"></div>';
   html+='<button class="btn btn-dark" onclick="calcDS()" style="margin-top:14px">Calcular</button>';
   html+='</div>';
-  var credsDS=(c.creditos||[]).filter(function(cr){return (cr.entidad||'').toUpperCase().split(' ').some(function(p){return ['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'].indexOf(p)>=0;});});
-  if(!credsDS.length) credsDS=c.creditos||[];
-  credsDS.forEach(function(cr){
-    html+='<div style="background:#f4f8fd;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:12px">';
+  var itemsDS=_dsItems(c);
+  if(itemsDS.length>1){
+    html+='<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="ds-todos" checked onchange="dsToggleTodos(this.checked)"> Incluir todos los cr\u00e9ditos</label>';
+  }
+  itemsDS.forEach(function(it){
+    var cr=it.cr;
+    html+='<label style="display:flex;align-items:center;gap:8px;background:#f4f8fd;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:12px;cursor:pointer">';
+    html+='<input type="checkbox" class="ds-chk" value="'+it.i+'" checked onchange="dsCambioSel()"> <span>';
     html+='<strong>'+(cr.num||'Sin n\u00famero')+'</strong>  &middot;  Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong>  &middot;  Mora: <strong>'+(fmtDMA(cr.fecha)||'—')+'</strong>';
-    html+='</div>';
+    html+='</span></label>';
   });
   html+='<div id="ds-resultado"></div></div>';
   return html;
@@ -1462,8 +1483,9 @@ function generarSeccionDS(c){
 function calcDS(){
   var c=clienteActivo;
   var tasaMens=(parseFloat((document.getElementById('ds-tasa')||{value:15}).value)||15)/100;
-  var credsDS=(c.creditos||[]).filter(function(cr){return (cr.entidad||'').toUpperCase().split(' ').some(function(p){return ['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'].indexOf(p)>=0;});});
-  if(!credsDS.length) credsDS=c.creditos||[];
+  var sel=Array.prototype.map.call(document.querySelectorAll('.ds-chk:checked'),function(x){return parseInt(x.value,10);});
+  var credsDS=_dsItems(c).filter(function(it){return sel.indexOf(it.i)>=0;}).map(function(it){return it.cr;});
+  if(!credsDS.length){ document.getElementById('ds-resultado').innerHTML='<div style="color:#a32d2d;font-size:12px;padding:6px 0">Eleg\u00ed al menos un cr\u00e9dito para calcular.</div>'; return; }
   var rd=function(n){return Math.round(n/100)*100;};
   var fmt=function(n){return '$'+Math.round(n).toLocaleString('es-AR');};
   var fHoy=new Date();
