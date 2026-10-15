@@ -657,7 +657,7 @@ a{color:inherit;text-decoration:none}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.10.5</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.10.6</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -900,7 +900,7 @@ function renderLista(){
   const fil = DB.clientes.filter(c=>{
     const qNorm=q.replace(/\./g,'');
     const dniNorm=(c.dni||'').replace(/\./g,'');
-    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.creditos||[]).map(x=>x.num).join('')).toLowerCase();
+    const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.referencias||[]).join('')+(c.creditos||[]).map(x=>x.num).join('')).toLowerCase();
     const enEnt = !fEnt || (c.creditos||[]).some(x=>x.entidad===fEnt) || c.entidad===fEnt;
     const enCar = !fCar || (c.creditos||[]).some(x=>x.cartera===fCar) || c.cartera===fCar;
     return (!qNorm||txt.includes(qNorm)) && (!fEst||c.estado===fEst) && enEnt && enCar;
@@ -1274,6 +1274,7 @@ function renderDatos(){
     return `<div class="multi-item"><input value="${t}" onchange="editTel(${i},this.value)">${wspBtn}<button class="btn btn-red btn-sm" onclick="delTel(${i})">✕</button></div>`;
   }).join('');
   const mails=(c.mails||[]).map((m,i)=>`<div class="multi-item"><input value="${m}" onchange="editMail(${i},this.value)"><button class="btn btn-red btn-sm" onclick="delMail(${i})">✕</button></div>`).join('');
+  const refs=(c.referencias||[]).map((r,i)=>`<div class="multi-item"><input value="${String(r).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}" onchange="editRef(${i},this.value)" placeholder="Ej: familiar, empleador, domicilio laboral..."><button class="btn btn-red btn-sm" onclick="delRef(${i})">✕</button></div>`).join('');
   return `
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <h2 style="font-size:16px">${c.nombre||'Sin nombre'} <span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}" style="font-size:11px;padding:3px 9px">${c.estado||'Pendiente'}</span></h2>
@@ -1301,6 +1302,12 @@ function renderDatos(){
         <div id="listMails">${mails}</div>
         <button class="btn btn-green btn-sm" style="margin-top:6px" onclick="addMail()">+ Agregar mail</button>
       </div>
+    </div>
+    <sep class="sep"></sep>
+    <div>
+      <div class="card-title" style="margin-bottom:8px">Dato referencia adicional</div>
+      <div id="listRefs">${refs}</div>
+      <button class="btn btn-green btn-sm" style="margin-top:6px" onclick="addRef()">+ Agregar dato de referencia</button>
     </div>
   </div>`;
 }
@@ -1858,6 +1865,26 @@ function delMail(i){
   DB.clientes[idx].mails.splice(i,1);
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);setTabAdmin('datos');
+}
+function addRef(){
+  const idx=idxClienteActivo();
+  if(!DB.clientes[idx].referencias) DB.clientes[idx].referencias=[];
+  DB.clientes[idx].referencias.push('');
+  clienteActivo=DB.clientes[idx];
+  saveDB(clienteActivo);setTabAdmin('datos');
+}
+function delRef(i){
+  const idx=idxClienteActivo();
+  (DB.clientes[idx].referencias||[]).splice(i,1);
+  clienteActivo=DB.clientes[idx];
+  saveDB(clienteActivo);setTabAdmin('datos');
+}
+function editRef(i,v){
+  const idx=idxClienteActivo();
+  if(!DB.clientes[idx].referencias) DB.clientes[idx].referencias=[];
+  DB.clientes[idx].referencias[i]=v;
+  clienteActivo=DB.clientes[idx];
+  saveDB(clienteActivo);
 }
 function editMail(i,v){
   const idx=idxClienteActivo();
@@ -3240,6 +3267,8 @@ async function ejecutarLimpiezaDuplicados(){
       (D.telefonos||[]).forEach(function(t){ const d=digitos(t); if(d && yaT.indexOf(d)<0){ P.telefonos.push(t); yaT.push(d); } });
       const yaM=(P.mails||[]).map(function(x){return String(x).toLowerCase();}); if(!P.mails) P.mails=[];
       (D.mails||[]).forEach(function(m){ if(m && yaM.indexOf(String(m).toLowerCase())<0){ P.mails.push(m); yaM.push(String(m).toLowerCase()); } });
+      // referencias adicionales
+      if(D.referencias&&D.referencias.length){ if(!P.referencias) P.referencias=[]; D.referencias.forEach(function(r){ if(r && P.referencias.indexOf(r)<0) P.referencias.push(r); }); }
       // WhatsApp marcados
       if(D.telsWsp&&D.telsWsp.length){ if(!P.telsWsp) P.telsWsp=[]; D.telsWsp.forEach(function(t){ if(P.telsWsp.indexOf(t)<0) P.telsWsp.push(t); }); }
       // trámites
