@@ -12,11 +12,15 @@
 <meta http-equiv="expires" content="0">
 <title>Sistema Collector — EPSAN</title>
 
-<script>window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
+<script>
+window._ROL='usuario';
+window.esAdmin=function(){ return window._ROL==='admin'; };
+window.soloAdmin=function(msg){ if(window._ROL==='admin') return true; alert(msg||'Tu usuario solo puede agregar y consultar. Esta acción es exclusiva del administrador.'); return false; };
+window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch, serverTimestamp, query, orderBy, limit, startAfter, where, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, createUserWithEmailAndPassword, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBcOR-D4SKD7kA-VNcnXTvzw4ajpukXPFU",
@@ -59,6 +63,7 @@ window.logoutEpsan = async function(){
   if(!confirm('¿Cerrar sesión?')) return;
   try{ await _IDB.limpiar(); }catch(e){}
   await signOut(auth);
+  location.reload(); // estado limpio: no queda nada del usuario anterior en pantalla
 };
 
   
@@ -70,7 +75,7 @@ function mostrarLogin(){
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('login-mail').value='';
   document.getElementById('login-pass').value='';
-  document.getElementById('login-err').textContent='';
+  document.getElementById('login-err').textContent=window._loginMsg||''; window._loginMsg='';
   document.getElementById('login-btn').textContent='Ingresar';
   document.getElementById('login-btn').disabled=false;
 }
@@ -205,6 +210,7 @@ window.saveDBCliente=function(c){ window.saveDB(c); };
 window.saveDBConfig=function(){ window.saveDB(null); };
 
 window.deleteClienteDB=async function(id){
+  if(window._ROL!=='admin') return;
   window.DB.clientes=window.DB.clientes.filter(c=>c.id!==id);
   window._eliminarClienteDeCache(id); // sacar solo este cliente de la caché, sin tirar el resto
   try{ await deleteDoc(doc(db_fs,'clientes',id)); }catch(e){}
@@ -212,6 +218,7 @@ window.deleteClienteDB=async function(id){
 };
 
 window.importarMasivo=async function(clientes,reemplazar){
+  if(window._ROL!=='admin') return false;
   actualizarIndicador('guardando');
   window._fbSaving=true;
   try {
@@ -423,12 +430,92 @@ async function cargarDatos(){
   }
 }
 
+// -- USUARIOS Y ROLES --
+// sistema/usuarios = { adminEmail, usuarios:[{nombre,email,creado}], emails:[...] }
+// Administrador: todos los permisos. Usuario: solo agregar y consultar.
+const USR_REF = doc(db_fs, "sistema", "usuarios");
+const MAX_USUARIOS = 5; // total, incluyendo al administrador
+
+window.usrMax = MAX_USUARIOS;
+window.usrLeer = async function(){
+  const sn = await getDoc(USR_REF);
+  const d = sn.exists() ? sn.data() : null;
+  if(d) window._usrDoc = d;
+  return d;
+};
+
+async function resolverRol(user){
+  const mail = (user.email||'').toLowerCase();
+  let d = await window.usrLeer();
+  if(!d){
+    // primera vez que se usa el sistema con usuarios: quien ingresa es el administrador
+    d = { adminEmail: mail, usuarios: [], emails: [] };
+    await setDoc(USR_REF, { ...d, ts: serverTimestamp() });
+    window._usrDoc = d;
+  }
+  if((d.adminEmail||'').toLowerCase() === mail) return 'admin';
+  if((d.emails||[]).map(function(x){return String(x).toLowerCase();}).includes(mail)) return 'usuario';
+  return null; // no habilitado
+}
+
+window.usrCrear = async function(nombre, email, pass){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador puede crear usuarios');
+  const d = (await window.usrLeer()) || window._usrDoc;
+  const lista = (d.usuarios||[]).slice();
+  if(1 + lista.length >= MAX_USUARIOS) throw new Error('Se alcanzó el máximo de '+MAX_USUARIOS+' usuarios (incluido el administrador)');
+  const mail = String(email||'').trim().toLowerCase();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) throw new Error('El mail no es válido');
+  if(mail === (d.adminEmail||'').toLowerCase() || lista.some(function(u){return u.email===mail;})) throw new Error('Ese mail ya está en la lista');
+  let aviso = '';
+  // app secundaria: así crear el usuario no cierra la sesión del administrador
+  const sec = getApps().some(function(a){return a.name==='secundaria';}) ? getApp('secundaria') : initializeApp(firebaseConfig,'secundaria');
+  const secAuth = getAuth(sec);
+  try{
+    await createUserWithEmailAndPassword(secAuth, mail, pass);
+    await signOut(secAuth);
+  }catch(e){
+    if(e.code==='auth/email-already-in-use') aviso = 'Ese mail ya existía en Firebase: se habilitó con la clave que ya tenía.';
+    else if(e.code==='auth/weak-password') throw new Error('La contraseña debe tener al menos 6 caracteres');
+    else if(e.code==='auth/admin-restricted-operation' || e.code==='auth/operation-not-allowed') throw new Error('Firebase no permite crear usuarios desde la app. Crealo en la consola de Firebase (Authentication > Users) y volvé a cargarlo acá con una clave cualquiera.');
+    else throw e;
+  }
+  lista.push({ nombre: String(nombre||'').trim(), email: mail, creado: Date.now() });
+  const nd = { adminEmail: d.adminEmail, usuarios: lista, emails: lista.map(function(u){return u.email;}) };
+  await setDoc(USR_REF, { ...nd, ts: serverTimestamp() });
+  window._usrDoc = nd;
+  return aviso;
+};
+
+window.usrQuitar = async function(email){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador puede quitar usuarios');
+  const d = (await window.usrLeer()) || window._usrDoc;
+  const lista = (d.usuarios||[]).filter(function(u){return u.email!==email;});
+  const nd = { adminEmail: d.adminEmail, usuarios: lista, emails: lista.map(function(u){return u.email;}) };
+  await setDoc(USR_REF, { ...nd, ts: serverTimestamp() });
+  window._usrDoc = nd;
+};
+
+window.usrResetClave = async function(email){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador');
+  await sendPasswordResetEmail(auth, email);
+};
+
 // -- AUTH STATE --
-onAuthStateChanged(auth, function(user){
+onAuthStateChanged(auth, async function(user){
   if(user){
-    // Usuario logueado — mostrar app y cargar datos
+    let rol;
+    try{ rol = await resolverRol(user); }
+    catch(e){ console.warn('No se pudo verificar el rol, se ingresa como usuario restringido', e); rol = 'usuario'; }
+    if(rol === null){
+      window._loginMsg = 'Tu usuario no está habilitado. Pedile acceso al administrador.';
+      try{ await _IDB.limpiar(); }catch(e){}
+      await signOut(auth);
+      return;
+    }
+    window._ROL = rol;
+    document.body.classList.toggle('rol-usuario', rol !== 'admin');
     const emailEl=document.getElementById('user-email');
-    if(emailEl) emailEl.textContent=user.email;
+    if(emailEl) emailEl.innerHTML=String(user.email||'').replace(/</g,'&lt;')+'<span class="rol-badge">'+(rol==='admin'?'Administrador':'Usuario')+'</span>';
     window._fbUserEmail=user.email||'';
     mostrarApp();
     var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
@@ -436,6 +523,7 @@ onAuthStateChanged(auth, function(user){
     // No logueado — dar de baja listeners activos de Firestore para evitar
     // errores de "permission-denied" (las reglas exigen request.auth != null)
     if(window._unsubConfig){ window._unsubConfig(); window._unsubConfig=null; }
+    window._ROL='usuario';
     mostrarLogin();
   }
 });
@@ -443,6 +531,7 @@ onAuthStateChanged(auth, function(user){
 
 // -- saveMuchos: guardar multiples clientes en paralelo (4 batches a la vez) --
 window.saveMuchos = async function(clientes, config){
+  if(window._ROL!=='admin') return false;
   window._fbSaving = true;
   const BSIZ = 450, CONCURRENCIA = 4;
   const total = clientes.length;
@@ -486,6 +575,7 @@ window.saveMuchos = async function(clientes, config){
 };
 
 window.borrarMuchos = async function(ids){
+  if(window._ROL!=='admin') return false;
   const BSIZ=450;
   try{
     for(let i=0;i<ids.length;i+=BSIZ){
@@ -555,6 +645,8 @@ a{color:inherit;text-decoration:none}
 #user-email{font-size:11px;color:#a8c4e8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:200px}
 .btn-logout{padding:3px 10px;border-radius:6px;border:1px solid #a8c4e8;background:transparent;color:#a8c4e8;font-size:11px;cursor:pointer}
 .btn-logout:hover{background:rgba(255,255,255,.15);color:#fff}
+body.rol-usuario .solo-admin{display:none!important}
+.rol-badge{font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(255,255,255,.18);margin-left:5px}
 
 .body{display:flex;flex:1;overflow:hidden}
 .leftpanel{width:260px;background:#fff;border-right:1px solid #c8d8ec;display:flex;flex-direction:column;flex-shrink:0;overflow:hidden}
@@ -657,14 +749,14 @@ a{color:inherit;text-decoration:none}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.10.6</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.11.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
   <div class="modnav" style="margin-left:12px">
     <div class="mb active" onclick="setMod('admin',this)">Administraci&#243;n</div>
     <div class="mb" onclick="setMod('consultas',this)">Consultas</div>
-    <div class="mb" onclick="setMod('herramientas',this)">Herramientas</div>
+    <div class="mb solo-admin" onclick="setMod('herramientas',this)">Herramientas</div>
   </div>
   <div class="topnav-right">
     <span id="user-email"></span>
@@ -685,12 +777,12 @@ a{color:inherit;text-decoration:none}
   </div>
   <div class="lp-list" id="clientList"></div>
   <div class="lp-footer">
-    <button class="btn btn-dark" style="flex:1;font-size:11px" onclick="abrirNuevoCliente()">+ Nuevo</button>
-    <button class="btn btn-outline" style="font-size:11px" onclick="exportarExcel()">&#128229; Excel</button>
+    <button class="btn btn-dark solo-admin" style="flex:1;font-size:11px" onclick="abrirNuevoCliente()">+ Nuevo</button>
+    <button class="btn btn-outline solo-admin" style="font-size:11px" onclick="exportarExcel()">&#128229; Excel</button>
   </div>
 </div>
 <div class="mainarea" id="mainArea">
-  <div class="welcome"><h2>Sistema Collector EPSAN</h2><p>Seleccion&#225; un cliente del panel izquierdo</p><button class="btn btn-dark" onclick="abrirNuevoCliente()" style="margin-top:8px">+ Nuevo cliente</button></div>
+  <div class="welcome"><h2>Sistema Collector EPSAN</h2><p>Seleccion&#225; un cliente del panel izquierdo</p><button class="btn btn-dark solo-admin" onclick="abrirNuevoCliente()" style="margin-top:8px">+ Nuevo cliente</button></div>
 </div>
 </div>
 </div>
@@ -856,6 +948,7 @@ var tabActiva = 'avanzada';
 // MÓDULOS
 // ===================================================
 function setMod(mod, el){
+  if(mod==='herramientas' && !soloAdmin()) return;
   document.querySelectorAll('.mb').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
   modActivo = mod;
@@ -1109,7 +1202,7 @@ function renderAvanzada(){
   const html=`
   <div class="card">
     <div class="card-hdr"><div class="card-title">Filtros avanzados</div>
-      <button class="btn btn-outline btn-sm" onclick="abrirConfig()">&#9881;&#65039; Config entidades</button>
+      <button class="btn btn-outline btn-sm solo-admin" onclick="abrirConfig()">&#9881;&#65039; Config entidades</button>
     </div>
     <div class="adv-filters">
       <div class="fld"><label>Entidad</label>
@@ -1238,7 +1331,7 @@ function renderTablaAvanzada(){
   }).join('');
   el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
     <span style="font-size:12px;font-weight:600;color:#2557a7">${filas.length} cliente/s encontrado/s</span>
-    <button class="btn btn-green btn-sm" onclick="exportarResultadoAvanzada()">&#128229; Exportar Excel</button>
+    <button class="btn btn-green btn-sm solo-admin" onclick="exportarResultadoAvanzada()">&#128229; Exportar Excel</button>
   </div>
   <table class="tbl"><thead><tr>${ths}</tr></thead><tbody>`+
     filas.map(function(f){
@@ -1271,14 +1364,14 @@ function renderDatos(){
   const tels=(c.telefonos||[]).map((t,i)=>{
     const tieneWsp=!!t && wspList.includes(String(t).trim());
     const wspBtn=`<button class="btn btn-sm" onclick="toggleWspTel(${i})" title="${tieneWsp?'Tiene WhatsApp (clic para quitar)':'Marcar como WhatsApp'}" style="padding:3px 7px;border:1px solid ${tieneWsp?'#25D366':'#ddd'};background:${tieneWsp?'#E7F9EE':'#fff'};color:${tieneWsp?'#128C7E':'#bbb'};font-weight:700">&#128172; WA</button>`;
-    return `<div class="multi-item"><input value="${t}" onchange="editTel(${i},this.value)">${wspBtn}<button class="btn btn-red btn-sm" onclick="delTel(${i})">✕</button></div>`;
+    return `<div class="multi-item"><input value="${t}" ${(esAdmin()||!t)?'':'readonly'} onchange="editTel(${i},this.value)"><span class="solo-admin">${wspBtn}</span><button class="btn btn-red btn-sm solo-admin" onclick="delTel(${i})">✕</button></div>`;
   }).join('');
-  const mails=(c.mails||[]).map((m,i)=>`<div class="multi-item"><input value="${m}" onchange="editMail(${i},this.value)"><button class="btn btn-red btn-sm" onclick="delMail(${i})">✕</button></div>`).join('');
-  const refs=(c.referencias||[]).map((r,i)=>`<div class="multi-item"><input value="${String(r).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}" onchange="editRef(${i},this.value)" placeholder="Ej: familiar, empleador, domicilio laboral..."><button class="btn btn-red btn-sm" onclick="delRef(${i})">✕</button></div>`).join('');
+  const mails=(c.mails||[]).map((m,i)=>`<div class="multi-item"><input value="${m}" ${(esAdmin()||!m)?'':'readonly'} onchange="editMail(${i},this.value)"><button class="btn btn-red btn-sm solo-admin" onclick="delMail(${i})">✕</button></div>`).join('');
+  const refs=(c.referencias||[]).map((r,i)=>`<div class="multi-item"><input value="${String(r).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}" onchange="editRef(${i},this.value)" ${(esAdmin()||!r)?'':'readonly'} placeholder="Ej: familiar, empleador, domicilio laboral..."><button class="btn btn-red btn-sm solo-admin" onclick="delRef(${i})">✕</button></div>`).join('');
   return `
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <h2 style="font-size:16px">${c.nombre||'Sin nombre'} <span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}" style="font-size:11px;padding:3px 9px">${c.estado||'Pendiente'}</span></h2>
-    <button class="btn btn-outline btn-sm" onclick="abrirEditarCliente('${c.id}')">✏️ Editar</button>
+    <button class="btn btn-outline btn-sm solo-admin" onclick="abrirEditarCliente('${c.id}')">✏️ Editar</button>
   </div>
   <div class="card">
     <div class="card-title" style="margin-bottom:10px">Datos personales</div>
@@ -1329,7 +1422,7 @@ function renderCuenta(){
           <div style="font-size:11px;color:#888;margin-top:2px">${cr.comercio||'—'} · Mora: ${fmtDMA(cr.fecha)||'—'} · Entidad: <strong>${cr.entidad||'—'}</strong> · Cartera: <strong>${cr.cartera||'—'}</strong></div>
         </div>
         <div style="display:flex;gap:6px">
-          <button class="btn btn-outline btn-sm" onclick="abrirEditarCredito(${i})">✏️</button>
+          <button class="btn btn-outline btn-sm solo-admin" onclick="abrirEditarCredito(${i})">✏️</button>
         </div>
       </div>
       <div class="g3">
@@ -1380,7 +1473,7 @@ function renderCuenta(){
               '<div>'+estadoTxt+detallePagos+'</div>'+
               '<div>'+
               (p.pagadaParcial?'<div style="font-size:10px;color:#854F0B;margin-bottom:2px">Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR')+'</div>':'')+ 
-              '<button class="btn btn-sm '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
+              '<button class="btn btn-sm solo-admin '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
               '</div>'+
             '</div>';
           }).join('');
@@ -1432,8 +1525,8 @@ function renderCuenta(){
   <div class="card-hdr" style="margin-bottom:10px">
     <div style="font-size:15px;font-weight:600">Cuenta Corriente</div>
     <div style="display:flex;gap:6px">
-      ${creds.length?'<button class="btn btn-green btn-sm" onclick="abrirPlan()">📋 Plan</button>':''}
-      <button class="btn btn-dark btn-sm" onclick="abrirNuevoCredito()">+ Crédito</button>
+      ${creds.length?'<button class="btn btn-green btn-sm solo-admin" onclick="abrirPlan()">📋 Plan</button>':''}
+      <button class="btn btn-dark btn-sm solo-admin" onclick="abrirNuevoCredito()">+ Crédito</button>
     </div>
   </div>
   <div class="card" style="background:#EAF3DE;border-color:#C0DD97">
@@ -1609,7 +1702,7 @@ function renderTramites(){
   var html='<div class="card-hdr" style="margin-bottom:10px">';
   html+='<div style="font-size:15px;font-weight:600">Tr&aacute;mites ('+total+')</div>';
   html+='<div style="display:flex;gap:7px;align-items:center">';
-  html+='<select id="est-cli" onchange="cambiarEstadoCliente()" style="padding:5px 8px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none">'+estOpts+'</select>';
+  html+='<select id="est-cli" onchange="cambiarEstadoCliente()"'+(window.esAdmin()?'':' disabled')+' style="padding:5px 8px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none">'+estOpts+'</select>';
   html+='<button class="btn btn-dark btn-sm" onclick="abrirTramite()">+ Nuevo tr&aacute;mite</button>';
   html+='</div></div>';
   if(!trs.length){
@@ -1624,8 +1717,8 @@ function renderTramites(){
       html+='</div>';
       html+='<div style="display:flex;align-items:center;gap:8px">';
       html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+(t.user?' &middot; '+String(t.user).split('@')[0]:'')+'</span>';
-      html+='<button class="btn btn-outline btn-sm" onclick="editarTramite('+idxReal+')" title="Editar">&#9998;</button>';
-      html+='<button class="btn btn-red btn-sm" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
+      html+='<button class="btn btn-outline btn-sm solo-admin" onclick="editarTramite('+idxReal+')" title="Editar">&#9998;</button>';
+      html+='<button class="btn btn-red btn-sm solo-admin" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
       html+='</div></div>';
       html+='<div class="tr-nota">'+t.nota+'</div>';
       if(t.estadoCambio) html+='<div style="margin-top:5px;font-size:10px;color:#888">Estado &rarr; <strong>'+t.estadoCambio+'</strong></div>';
@@ -1735,7 +1828,7 @@ function renderWelcome(){
   document.getElementById('mainArea').innerHTML=`
   <div class="tabbar">${TABS_ADMIN.map(t=>`<div class="tb ${tabActiva===t.id?'active':''}" onclick="setTabAdmin('${t.id}')">${t.label}</div>`).join('')}</div>
   <div class="tabcontent">
-    ${tabActiva==='busqueda'?`<div>${renderBusqueda()}</div>`:`<div class="welcome"><h2>Sistema Collector EPSAN</h2><p>Seleccioná un cliente del panel izquierdo</p><button class="btn btn-dark" onclick="abrirNuevoCliente()" style="margin-top:8px">+ Nuevo cliente</button></div>`}
+    ${tabActiva==='busqueda'?`<div>${renderBusqueda()}</div>`:`<div class="welcome"><h2>Sistema Collector EPSAN</h2><p>Seleccioná un cliente del panel izquierdo</p><button class="btn btn-dark solo-admin" onclick="abrirNuevoCliente()" style="margin-top:8px">+ Nuevo cliente</button></div>`}
   </div>`;
   attachEvents();
 }
@@ -1788,6 +1881,7 @@ function guardarCliente(){
     estado:document.getElementById('mc-est').value,
   };
   if(!datos.nombre){alert('El nombre es obligatorio');return;}
+  if(editandoCliId && !soloAdmin()) return;
   if(editandoCliId){
     const idx=DB.clientes.findIndex(c=>c.id===editandoCliId);
     DB.clientes[idx]={...DB.clientes[idx],...datos};
@@ -1829,6 +1923,7 @@ function editTel(i,v){
   const idx=idxClienteActivo();
   const c=DB.clientes[idx];
   const viejo=String(c.telefonos[i]||'').trim();
+  if(viejo && !soloAdmin()){ setTabAdmin('datos'); return; }
   c.telefonos[i]=v;
   // si el número tenía WhatsApp, la marca acompaña al número editado
   if(c.telsWsp && viejo && c.telsWsp.includes(viejo)){
@@ -1881,6 +1976,7 @@ function delRef(i){
 }
 function editRef(i,v){
   const idx=idxClienteActivo();
+  if(String((DB.clientes[idx].referencias||[])[i]||'').trim() && !soloAdmin()){ setTabAdmin('datos'); return; }
   if(!DB.clientes[idx].referencias) DB.clientes[idx].referencias=[];
   DB.clientes[idx].referencias[i]=v;
   clienteActivo=DB.clientes[idx];
@@ -1888,6 +1984,7 @@ function editRef(i,v){
 }
 function editMail(i,v){
   const idx=idxClienteActivo();
+  if(String(DB.clientes[idx].mails[i]||'').trim() && !soloAdmin()){ setTabAdmin('datos'); return; }
   DB.clientes[idx].mails[i]=v;
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);
@@ -1936,6 +2033,7 @@ function guardarCredito(){
     entidad:document.getElementById('cr-ent').value,
     cartera:document.getElementById('cr-car').value,
   };
+  if(editandoCredIdx!==null && !soloAdmin()) return;
   const idx=idxClienteActivo();
   if(!DB.clientes[idx].creditos) DB.clientes[idx].creditos=[];
   if(editandoCredIdx!==null){
@@ -2444,7 +2542,7 @@ function renderComerciosConsulta(){
   var comercios=DB.comercios||[];
   el.innerHTML='<div class="card">'+
     '<div class="card-hdr"><div class="card-title">Comercios ('+comercios.length+')</div>'+
-    '<button class="btn btn-dark btn-sm" onclick="abrirModalComercioConsulta(-1)">+ Nuevo</button></div>'+
+    '<button class="btn btn-dark btn-sm solo-admin" onclick="abrirModalComercioConsulta(-1)">+ Nuevo</button></div>'+
     '<div style="margin-bottom:12px">'+
     '<input id="com-search" placeholder="Buscar por nombre de comercio..." oninput="filtrarComerciosConsulta()" '+
     'style="width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">'+
@@ -2474,7 +2572,7 @@ function filtrarComerciosConsulta(){
         '<td>'+(c.telefono||'&mdash;')+'</td>'+
         '<td>'+(c.mail||'&mdash;')+'</td>'+
         '<td style="max-width:200px;font-size:11px">'+(c.datos||'&mdash;')+'</td>'+
-        '<td><button class="btn btn-outline btn-sm" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
+        '<td><button class="btn btn-outline btn-sm solo-admin" onclick="abrirModalComercioConsulta('+i+')">&#9998;</button></td>'+
       '</tr>';
     }).join('')+'</tbody></table>';
 }
@@ -2494,6 +2592,7 @@ function abrirModalComercioConsulta(i){
   document.getElementById('modalComercio').classList.add('open');
 }
 function guardarComercioConsulta(){
+  if(_idxComercio>=0 && !soloAdmin()) return;
   var datos={
     nombre:document.getElementById('com-nombre').value.trim(),
     producto:document.getElementById('com-producto').value.trim(),
@@ -2576,6 +2675,7 @@ function renderHerramientas(){
     <div class="tb" onclick="setTabHerr('mantenimiento',this)">&#9881; Mantenimiento</div>
     <div class="tb" onclick="setTabHerr('duplicados',this)">&#128465; Limpiar duplicados</div>
     <div class="tb" onclick="setTabHerr('importtel',this)">&#128222; Importar Tel/Tr&#225;mites</div>
+    <div class="tb" onclick="setTabHerr('usuarios',this)">&#128101; Usuarios</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
   renderImportar();
@@ -2589,6 +2689,7 @@ function setTabHerr(tab,el){
   else if(tab==='exportar') renderExportar();
   else if(tab==='backup') renderBackupTab();
   else if(tab==='importtel') renderImportarTelTramites();
+  else if(tab==='usuarios') renderUsuarios();
   else if(tab==='duplicados') renderLimpiarDuplicados();
   else if(tab==='mantenimiento'){
     if(!window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
@@ -3459,6 +3560,119 @@ function ejecutarCompletarFechasObs(){
 
 // Cerrar modales
 document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListener('click',function(e){ if(e.target===m) m.classList.remove('open'); }); });
+
+// ===================================================
+// USUARIOS (solo administrador)
+// ===================================================
+function _escU(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+const REGLAS_FIRESTORE = [
+"rules_version = '2';",
+"service cloud.firestore {",
+"  match /databases/{database}/documents {",
+"    function lista() { return get(/databases/$(database)/documents/sistema/usuarios).data; }",
+"    function esAdmin() { return request.auth != null && request.auth.token.email.lower() == lista().adminEmail.lower(); }",
+"    function habilitado() { return esAdmin() || (request.auth != null && request.auth.token.email.lower() in lista().emails); }",
+"",
+"    match /sistema/usuarios {",
+"      allow read: if request.auth != null;",
+"      allow write: if esAdmin();",
+"    }",
+"    match /sistema/{doc} {",
+"      allow read, write: if habilitado();",
+"    }",
+"    match /clientes/{id} {",
+"      allow read, create, update: if habilitado();",
+"      allow delete: if esAdmin();",
+"    }",
+"  }",
+"}"
+].join('\n');
+
+async function renderUsuarios(){
+  const el=document.getElementById('herrContent');
+  if(!el) return;
+  if(!window.esAdmin()){ el.innerHTML=''; return; }
+  el.innerHTML='<div style="color:#aaa;font-size:12px;padding:16px">Cargando usuarios…</div>';
+  let d;
+  try{ d=await window.usrLeer(); }catch(e){ el.innerHTML='<div style="color:#c00;padding:16px">No se pudo leer la lista de usuarios: '+_escU(e.message)+'</div>'; return; }
+  d=d||window._usrDoc||{adminEmail:window._fbUserEmail,usuarios:[],emails:[]};
+  const lista=d.usuarios||[];
+  const total=1+lista.length, max=window.usrMax||5;
+  const filas=lista.map(function(u){
+    return '<tr><td>'+_escU(u.nombre||'—')+'</td><td>'+_escU(u.email)+'</td><td><span class="badge bp">Agregar y consultar</span></td>'+
+      '<td style="white-space:nowrap"><button class="btn btn-outline btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosReset(this.dataset.m)">Enviar cambio de clave</button> '+
+      '<button class="btn btn-red btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosQuitar(this.dataset.m)">Quitar</button></td></tr>';
+  }).join('');
+  const form = total<max
+    ? '<div class="card-title" style="margin:16px 0 8px">Agregar usuario</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end;max-width:820px">'+
+        '<div class="fld"><label>Nombre</label><input id="usr-nombre" placeholder="Ej: María"></div>'+
+        '<div class="fld"><label>Mail (usuario)</label><input id="usr-mail" type="email" placeholder="usuario@mail.com"></div>'+
+        '<div class="fld"><label>Contraseña (mín. 6)</label><input id="usr-pass" type="text" autocomplete="off"></div>'+
+        '<button class="btn btn-dark" id="usr-btn" onclick="usuariosCrear()">Crear</button>'+
+      '</div><div id="usr-msg" style="font-size:12px;margin-top:8px"></div>'
+    : '<div style="margin-top:14px;font-size:12px;color:#854F0B">Se alcanzó el máximo de '+max+' usuarios. Quitá uno para poder agregar otro.</div>';
+  el.innerHTML=
+  '<div class="card">'+
+    '<div class="card-hdr"><div class="card-title">Usuarios del sistema ('+total+' de '+max+')</div></div>'+
+    '<table class="tbl"><thead><tr><th>Nombre</th><th>Usuario (mail)</th><th>Permisos</th><th></th></tr></thead><tbody>'+
+      '<tr><td><strong>Administrador</strong></td><td>'+_escU(d.adminEmail)+'</td><td><span class="badge ba">Todos los permisos</span></td><td></td></tr>'+
+      filas+
+    '</tbody></table>'+form+
+    '<div style="margin-top:16px;font-size:12px;color:#666;line-height:1.5"><strong>Los usuarios pueden:</strong> consultar clientes, cuentas, tr\u00e1mites, b\u00fasquedas, comercios y subdiario; agregar tr\u00e1mites (y con ellos cambiar el estado del cliente), editar observaciones y agregar tel\u00e9fonos, mails y datos de referencia.<br>'+
+    '<strong>No pueden:</strong> crear clientes, cr\u00e9ditos ni comercios, exportar, usar Herramientas, editar ni eliminar datos ya cargados, registrar pagos, armar planes ni tocar la configuraci\u00f3n.</div>'+
+  '<div class="card" style="margin-top:12px">'+
+    '<div class="card-title" style="margin-bottom:6px">Reglas de seguridad de Firestore (recomendado)</div>'+
+    '<div style="font-size:12px;color:#666;margin-bottom:8px;line-height:1.5">Las restricciones de la pantalla se refuerzan en el servidor con estas reglas: impiden que un usuario elimine clientes o cambie la lista de usuarios aunque use otra herramienta. Se pegan en Firebase → Firestore Database → Reglas → Publicar. <strong>Publicalas después de haber ingresado vos una vez con esta versión</strong> (así queda registrada la lista de usuarios). Si tenés otras colecciones en las reglas, conservalas.</div>'+
+    '<textarea id="usr-reglas" readonly style="width:100%;height:230px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #ddd;border-radius:8px">'+_escU(REGLAS_FIRESTORE)+'</textarea>'+
+    '<div class="btn-row"><button class="btn btn-outline btn-sm" onclick="usuariosCopiarReglas()">Copiar reglas</button></div>'+
+  '</div>';
+}
+async function usuariosCrear(){
+  const n=document.getElementById('usr-nombre').value, m=document.getElementById('usr-mail').value, p=document.getElementById('usr-pass').value;
+  const msg=document.getElementById('usr-msg'), btn=document.getElementById('usr-btn');
+  if(!m.trim()||!p){ msg.style.color='#c00'; msg.textContent='Completá el mail y la contraseña.'; return; }
+  btn.disabled=true; btn.textContent='Creando…'; msg.textContent='';
+  try{
+    const aviso=await window.usrCrear(n,m,p);
+    await renderUsuarios();
+    const m2=document.getElementById('usr-msg') || document.getElementById('herrContent');
+    if(aviso){ alert(aviso); }
+  }catch(e){
+    msg.style.color='#c00'; msg.textContent=e.message||String(e);
+    btn.disabled=false; btn.textContent='Crear';
+  }
+}
+async function usuariosQuitar(mail){
+  if(!confirm('¿Quitar el acceso de '+mail+'? Ya no podrá ingresar al sistema.')) return;
+  try{ await window.usrQuitar(mail); renderUsuarios(); }catch(e){ alert('No se pudo quitar: '+(e.message||e)); }
+}
+async function usuariosReset(mail){
+  try{ await window.usrResetClave(mail); alert('Se envió a '+mail+' un mail para cambiar la contraseña.'); }catch(e){ alert('No se pudo enviar: '+(e.message||e)); }
+}
+function usuariosCopiarReglas(){
+  const t=document.getElementById('usr-reglas'); t.select();
+  try{ navigator.clipboard.writeText(t.value); }catch(e){ document.execCommand('copy'); }
+}
+
+// ===================================================
+// PERMISOS: funciones exclusivas del administrador
+// (la pantalla oculta los botones; esto bloquea tambien cualquier llamada directa)
+// ===================================================
+['abrirNuevoCliente','guardarCliente','abrirNuevoCredito','guardarCredito','abrirModalComercioConsulta','guardarComercioConsulta','eliminarCliente','abrirEditarCliente','eliminarCredito','abrirEditarCredito','abrirPlan','guardarPlan',
+ 'toggleCuota','deshacerPagoCuota','confirmarPago','eliminarTramite','editarTramite','guardarEdicionTramite',
+ 'abrirConfig','agregarEstado','elimEstado','agregarEntidad','elimEntidad','agregarCartera','elimCartera',
+ 'cambiarEstadoCliente','delTel','delMail','delRef','toggleWspTel','eliminarComercioConsulta',
+ 'exportarExcel','exportarResultadoAvanzada','exportarSubdiarioExcel','ejecutarExportar','exportarExcelClientes',
+ 'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
+ 'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
+ 'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs'
+].forEach(function(n){
+  var f=window[n];
+  if(typeof f!=='function') return;
+  window[n]=function(){ if(!window.soloAdmin()) return; return f.apply(this,arguments); };
+});
+
 </script>
 
 <div class="modal-overlay" id="modalSubdiario">
@@ -3479,7 +3693,7 @@ document.querySelectorAll('.modal-overlay').forEach(function(m){ m.addEventListe
   <div id="sd-resumen" style="display:none;background:#EAF3DE;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#27500A;font-weight:600"></div>
   <div id="sd-resultado" style="max-height:52vh;overflow-y:auto"></div>
   <div style="display:flex;gap:8px;margin-top:14px">
-    <button class="btn btn-outline btn-sm" id="sd-btn-excel" style="display:none" onclick="exportarSubdiarioExcel()">📊 Exportar a Excel</button>
+    <button class="btn btn-outline btn-sm solo-admin" id="sd-btn-excel" style="display:none" onclick="exportarSubdiarioExcel()">📊 Exportar a Excel</button>
     <button class="btn btn-outline btn-sm" onclick="cerrarModal('modalSubdiario')" style="margin-left:auto">Cerrar</button>
   </div>
 </div>
