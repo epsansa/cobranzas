@@ -81,12 +81,14 @@ function mostrarLogin(){
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('login-mail').value='';
   document.getElementById('login-pass').value='';
-  document.getElementById('login-err').textContent=window._loginMsg||''; window._loginMsg='';
+  var _m=window._loginMsg||''; try{ if(!_m){ _m=sessionStorage.getItem('epsan_msg')||''; } }catch(e){}
+  document.getElementById('login-err').textContent=_m; window._loginMsg='';
   document.getElementById('login-btn').textContent='Ingresar';
   document.getElementById('login-btn').disabled=false;
 }
 
 function mostrarApp(){
+  try{ sessionStorage.removeItem('epsan_msg'); }catch(e){}
   document.getElementById('login-screen').style.display='none';
   document.getElementById('app').style.display='flex';
 }
@@ -538,11 +540,29 @@ onAuthStateChanged(auth, async function(user){
     if(emailEl){ emailEl.title=user.email||''; emailEl.innerHTML=String(window.nombreUsuario(user.email)).replace(/</g,'&lt;')+(rol==='admin'?'':'<span class="rol-badge">Usuario</span>'); }
     window._fbUserEmail=user.email||'';
     mostrarApp();
+    // vigilar la lista de usuarios en vivo: si el administrador te quita, se cierra la sesión al instante
+    if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} }
+    window._unsubUsr = onSnapshot(USR_REF, async function(sn){
+      const d = sn.data(); if(!d) return;
+      window._usrDoc = d;
+      const mail=(user.email||'').toLowerCase();
+      const ok = (d.adminEmail||'').toLowerCase()===mail || (d.emails||[]).map(function(x){return String(x).toLowerCase();}).includes(mail);
+      if(!ok){
+        try{ sessionStorage.setItem('epsan_msg','El administrador quitó tu acceso al sistema.'); }catch(e){}
+        try{ await _IDB.limpiar(); }catch(e){}
+        try{ await signOut(auth); }catch(e){}
+        location.reload();
+        return;
+      }
+      const el=document.getElementById('user-email');
+      if(el && window._ROL!=='admin' ) el.firstChild && (el.firstChild.nodeValue = window.nombreUsuario(user.email));
+    }, function(){});
     var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
   } else {
     // No logueado — dar de baja listeners activos de Firestore para evitar
     // errores de "permission-denied" (las reglas exigen request.auth != null)
     if(window._unsubConfig){ window._unsubConfig(); window._unsubConfig=null; }
+    if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} window._unsubUsr=null; }
     window._ROL='usuario';
     mostrarLogin();
   }
@@ -769,7 +789,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.11.1</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.11.2</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
