@@ -15,6 +15,12 @@
 <script>
 window._ROL='usuario';
 window.esAdmin=function(){ return window._ROL==='admin'; };
+window.nombreUsuario=function(email){
+  var m=String(email||'').toLowerCase(), d=window._usrDoc||{};
+  if((d.adminEmail||'').toLowerCase()===m) return d.adminNombre||'Administrador';
+  var u=(d.usuarios||[]).find(function(x){return String(x.email||'').toLowerCase()===m;});
+  return (u&&u.nombre)?u.nombre:String(email||'').split('@')[0];
+};
 window.soloAdmin=function(msg){ if(window._ROL==='admin') return true; alert(msg||'Tu usuario solo puede agregar y consultar. Esta acción es exclusiva del administrador.'); return false; };
 window.DB = { clientes:[], entidades:[], carteras:[], comercios:[], estados:["Pendiente","En acuerdo","Cancelado","Sin contacto"] };</script>
 <script type="module">
@@ -480,7 +486,7 @@ window.usrCrear = async function(nombre, email, pass){
     else throw e;
   }
   lista.push({ nombre: String(nombre||'').trim(), email: mail, creado: Date.now() });
-  const nd = { adminEmail: d.adminEmail, usuarios: lista, emails: lista.map(function(u){return u.email;}) };
+  const nd = { adminEmail: d.adminEmail, adminNombre: d.adminNombre||'', usuarios: lista, emails: lista.map(function(u){return u.email;}) };
   await setDoc(USR_REF, { ...nd, ts: serverTimestamp() });
   window._usrDoc = nd;
   return aviso;
@@ -490,9 +496,23 @@ window.usrQuitar = async function(email){
   if(window._ROL!=='admin') throw new Error('Solo el administrador puede quitar usuarios');
   const d = (await window.usrLeer()) || window._usrDoc;
   const lista = (d.usuarios||[]).filter(function(u){return u.email!==email;});
-  const nd = { adminEmail: d.adminEmail, usuarios: lista, emails: lista.map(function(u){return u.email;}) };
+  const nd = { adminEmail: d.adminEmail, adminNombre: d.adminNombre||'', usuarios: lista, emails: lista.map(function(u){return u.email;}) };
   await setDoc(USR_REF, { ...nd, ts: serverTimestamp() });
   window._usrDoc = nd;
+};
+
+window.usrRenombrar = async function(email, nombre){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador');
+  const d = (await window.usrLeer()) || window._usrDoc;
+  nombre = String(nombre||'').trim();
+  let lista = (d.usuarios||[]).slice(), adminNombre = d.adminNombre||'';
+  if(email === (d.adminEmail||'').toLowerCase()) adminNombre = nombre;
+  else lista = lista.map(function(u){ return u.email===email ? Object.assign({}, u, {nombre:nombre}) : u; });
+  const nd = { adminEmail: d.adminEmail, adminNombre: adminNombre, usuarios: lista, emails: lista.map(function(u){return u.email;}) };
+  await setDoc(USR_REF, { ...nd, ts: serverTimestamp() });
+  window._usrDoc = nd;
+  const el=document.getElementById('user-email');
+  if(el && (window._fbUserEmail||'').toLowerCase()===email){ el.textContent = window.nombreUsuario(email) + (window._ROL==='admin'?'':' · Usuario'); }
 };
 
 window.usrResetClave = async function(email){
@@ -515,7 +535,7 @@ onAuthStateChanged(auth, async function(user){
     window._ROL = rol;
     document.body.classList.toggle('rol-usuario', rol !== 'admin');
     const emailEl=document.getElementById('user-email');
-    if(emailEl) emailEl.innerHTML=String(user.email||'').replace(/</g,'&lt;')+'<span class="rol-badge">'+(rol==='admin'?'Administrador':'Usuario')+'</span>';
+    if(emailEl){ emailEl.title=user.email||''; emailEl.innerHTML=String(window.nombreUsuario(user.email)).replace(/</g,'&lt;')+(rol==='admin'?'':'<span class="rol-badge">Usuario</span>'); }
     window._fbUserEmail=user.email||'';
     mostrarApp();
     var _t=setInterval(function(){ if(typeof renderLista==="function"){ clearInterval(_t); cargarDatos(); } },100);
@@ -749,7 +769,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.11.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.11.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1716,7 +1736,7 @@ function renderTramites(){
       if(i===0) html+=' <span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; &Uacute;LTIMO</span>';
       html+='</div>';
       html+='<div style="display:flex;align-items:center;gap:8px">';
-      html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+(t.user?' &middot; '+String(t.user).split('@')[0]:'')+'</span>';
+      html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+(t.user?' &middot; '+String(window.nombreUsuario(t.user)).replace(/</g,'&lt;'):'')+'</span>';
       html+='<button class="btn btn-outline btn-sm solo-admin" onclick="editarTramite('+idxReal+')" title="Editar">&#9998;</button>';
       html+='<button class="btn btn-red btn-sm solo-admin" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
       html+='</div></div>';
@@ -3599,7 +3619,7 @@ async function renderUsuarios(){
   const lista=d.usuarios||[];
   const total=1+lista.length, max=window.usrMax||5;
   const filas=lista.map(function(u){
-    return '<tr><td>'+_escU(u.nombre||'—')+'</td><td>'+_escU(u.email)+'</td><td><span class="badge bp">Agregar y consultar</span></td>'+
+    return '<tr><td>'+_escU(u.nombre||'—')+' <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU(u.email)+'" data-n="'+_escU(u.nombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(u.email)+'</td><td><span class="badge bp">Agregar y consultar</span></td>'+
       '<td style="white-space:nowrap"><button class="btn btn-outline btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosReset(this.dataset.m)">Enviar cambio de clave</button> '+
       '<button class="btn btn-red btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosQuitar(this.dataset.m)">Quitar</button></td></tr>';
   }).join('');
@@ -3616,7 +3636,7 @@ async function renderUsuarios(){
   '<div class="card">'+
     '<div class="card-hdr"><div class="card-title">Usuarios del sistema ('+total+' de '+max+')</div></div>'+
     '<table class="tbl"><thead><tr><th>Nombre</th><th>Usuario (mail)</th><th>Permisos</th><th></th></tr></thead><tbody>'+
-      '<tr><td><strong>Administrador</strong></td><td>'+_escU(d.adminEmail)+'</td><td><span class="badge ba">Todos los permisos</span></td><td></td></tr>'+
+      '<tr><td><strong>'+_escU(d.adminNombre||'Administrador')+'</strong> <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU((d.adminEmail||'').toLowerCase())+'" data-n="'+_escU(d.adminNombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(d.adminEmail)+'</td><td><span class="badge ba">Todos los permisos</span></td><td></td></tr>'+
       filas+
     '</tbody></table>'+form+
     '<div style="margin-top:16px;font-size:12px;color:#666;line-height:1.5"><strong>Los usuarios pueden:</strong> consultar clientes, cuentas, tr\u00e1mites, b\u00fasquedas, comercios y subdiario; agregar tr\u00e1mites (y con ellos cambiar el estado del cliente), editar observaciones y agregar tel\u00e9fonos, mails y datos de referencia.<br>'+
@@ -3642,6 +3662,11 @@ async function usuariosCrear(){
     msg.style.color='#c00'; msg.textContent=e.message||String(e);
     btn.disabled=false; btn.textContent='Crear';
   }
+}
+async function usuariosRenombrar(mail,actual){
+  const n=prompt('Nombre que se mostrará para '+mail+':',actual||'');
+  if(n===null) return;
+  try{ await window.usrRenombrar(mail,n); renderUsuarios(); }catch(e){ alert('No se pudo cambiar: '+(e.message||e)); }
 }
 async function usuariosQuitar(mail){
   if(!confirm('¿Quitar el acceso de '+mail+'? Ya no podrá ingresar al sistema.')) return;
