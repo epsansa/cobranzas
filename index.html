@@ -580,6 +580,19 @@ window.chatEnviar = async function(conv, texto, cli){
   await b.commit();
 };
 
+window.chatMarcarLeidos = async function(ids){
+  // marca como leidos los privados recibidos (en la copia de quien los envio y en la propia)
+  if(!ids || !ids.length) return;
+  const now = Date.now();
+  const lote = ids.slice(0,200);
+  const b = writeBatch(db_fs);
+  lote.forEach(function(id){
+    const base = String(id).replace(/_[01]$/,'');
+    [0,1].forEach(function(i){ b.update(doc(db_fs,"mensajes",base+'_'+i), { leido: now }); });
+  });
+  await b.commit();
+};
+
 // -- AUTH STATE --
 onAuthStateChanged(auth, async function(user){
   if(user){
@@ -763,6 +776,8 @@ body.rol-usuario .solo-admin{display:none!important}
 .cm.mine{align-self:flex-end;background:#dbe8ff;border-color:#bcd1f5}
 .cm-h{font-size:10px;color:#7a869a;margin-bottom:2px}
 .cm-t{white-space:pre-wrap;word-wrap:break-word}
+.cm-r{font-size:10px;color:#9aa5b8;text-align:right;margin-top:3px}
+.cm-r.ok{color:#1d6fe8;font-weight:600}
 .cm-c{display:inline-block;margin-top:4px;font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid #2557a7;color:#2557a7;background:#fff;cursor:pointer}
 .chat-vacio{color:#9aa5b8;font-size:12px;text-align:center;margin:auto}
 .chat-foot{border-top:1px solid #e1e6ef;padding:8px;display:flex;flex-direction:column;gap:5px}
@@ -872,7 +887,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.12.1</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.13.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -3744,6 +3759,7 @@ const REGLAS_FIRESTORE = [
 "    match /mensajes/{id} {",
 "      allow read: if habilitado() && (resource.data.dueno == 'general' || resource.data.dueno == request.auth.token.email.lower());",
 "      allow create: if habilitado() && request.resource.data.de == request.auth.token.email.lower();",
+"      allow update: if habilitado() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leido']);",
 "      allow delete: if habilitado() && resource.data.creado < request.time - duration.value(7, 'd');",
 "    }",
 "    match /clientes/{id} {",
@@ -3866,6 +3882,20 @@ function _chatNoLeidos(conv){
   return _chatMsgsDe(conv).filter(function(m){ return m.de!==me && (m.t||0)>lr; }).length;
 }
 var _chatUltTotal=0;
+function _chatHora(t){
+  var d=new Date(t), h=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'), hoy=new Date();
+  if(d.toDateString()===hoy.toDateString()) return h;
+  return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+' '+h;
+}
+var _chatMarcando={};
+function _chatMarcarLeidosVisibles(ms){
+  if(document.hidden || String(_chatConvAct).indexOf('dm:')!==0) return;
+  var me=_chatMe();
+  var ids=ms.filter(function(m){ return m.de!==me && !m.leido && /_[01]$/.test(m.id) && !_chatMarcando[m.id]; }).map(function(m){ return m.id; });
+  if(!ids.length) return;
+  ids.forEach(function(id){ _chatMarcando[id]=1; });
+  window.chatMarcarLeidos(ids).catch(function(e){ ids.forEach(function(id){ delete _chatMarcando[id]; }); console.warn('chat: no se pudo marcar leido', e.code||e.message); });
+}
 function chatRender(){
   var convs=_chatConvs();
   var total=0; convs.forEach(function(c){ c.nl=_chatNoLeidos(c.id); total+=c.nl; });
@@ -3889,11 +3919,13 @@ function chatRender(){
     var hora=String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
     var quien=mine?'Vos':window.nombreUsuario(m.de);
     return '<div class="cm'+(mine?' mine':'')+'"><div class="cm-h">'+_chatEsc(quien)+' · '+hora+'</div><div class="cm-t">'+_chatEsc(m.texto)+'</div>'+
+      (mine&&String(m.conv).indexOf('dm:')===0?'<div class="cm-r'+(m.leido?' ok':'')+'">'+(m.leido?'✓✓ Leído '+_chatHora(m.leido):'✓ Enviado')+'</div>':'')+
       (m.clienteId?'<button class="cm-c" data-id="'+_chatEsc(m.clienteId)+'" onclick="chatAbrirCliente(this.dataset.id)">📎 '+_chatEsc(m.clienteNombre||'Cliente')+'</button>':'')+'</div>';
   }).join('');
   if(cerca||el.dataset.conv!==_chatConvAct) el.scrollTop=el.scrollHeight;
   el.dataset.conv=_chatConvAct;
   _chatMarcar(_chatConvAct);
+  _chatMarcarLeidosVisibles(ms);
   var b2=document.getElementById('chat-badge');
   var t2=0; convs.forEach(function(c){ t2+=_chatNoLeidos(c.id); });
   if(b2){ b2.style.display=t2?'flex':'none'; b2.textContent=t2>99?'99+':t2; }
