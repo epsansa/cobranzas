@@ -557,20 +557,27 @@ window.chatIniciar = function(email){
     limpiarViejos();
     if(window.chatRender) window.chatRender();
   }
-  const err = function(e){ console.warn('chat:', e.code||e.message); };
+  const err = function(e){ console.warn('chat:', e.code||e.message); window._chatErr = e.code||e.message; if(window.chatRender) window.chatRender(); };
   window._chatUnsubs = [
-    onSnapshot(query(MSG_COL, where('conv','==','general')), function(s){ mapG={}; s.forEach(function(d){ mapG[d.id]=d.data(); }); rebuild(); }, err),
-    onSnapshot(query(MSG_COL, where('miembros','array-contains',me)), function(s){ mapD={}; s.forEach(function(d){ mapD[d.id]=d.data(); }); rebuild(); }, err)
+    onSnapshot(query(MSG_COL, where('dueno','==','general')), function(s){ window._chatErr=''; mapG={}; s.forEach(function(d){ mapG[d.id]=d.data(); }); rebuild(); }, err),
+    onSnapshot(query(MSG_COL, where('dueno','==',me)), function(s){ window._chatErr=''; mapD={}; s.forEach(function(d){ mapD[d.id]=d.data(); }); rebuild(); }, err)
   ];
 };
 window.chatEnviar = async function(conv, texto, cli){
   const me = String(window._fbUserEmail||'').toLowerCase();
-  const miembros = conv==='general' ? [] : String(conv).replace(/^dm:/,'').split('|');
-  if(conv!=='general' && !miembros.includes(me)) throw new Error('Conversación no válida');
-  const id = 'm_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-  const m = { de: me, conv: conv, miembros: miembros, texto: String(texto).slice(0,2000), t: Date.now(), creado: serverTimestamp() };
+  const base = 'm_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+  const m = { de: me, conv: conv, texto: String(texto).slice(0,2000), t: Date.now(), creado: serverTimestamp() };
   if(cli){ m.clienteId = String(cli.id); m.clienteNombre = String(cli.nombre||''); }
-  await setDoc(doc(db_fs,"mensajes",id), m);
+  if(conv === 'general'){
+    await setDoc(doc(db_fs,"mensajes",base), Object.assign({}, m, { dueno: 'general' }));
+    return;
+  }
+  const par = String(conv).replace(/^dm:/,'').split('|');
+  if(par.length!==2 || !par.includes(me)) throw new Error('Conversación no válida');
+  // cada participante tiene su propia copia: asi cada uno lee solo lo suyo
+  const b = writeBatch(db_fs);
+  par.forEach(function(p, i){ b.set(doc(db_fs,"mensajes",base+'_'+i), Object.assign({}, m, { dueno: p })); });
+  await b.commit();
 };
 
 // -- AUTH STATE --
@@ -865,7 +872,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.12.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.12.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -3735,7 +3742,7 @@ const REGLAS_FIRESTORE = [
 "      allow read, write: if habilitado();",
 "    }",
 "    match /mensajes/{id} {",
-"      allow read: if habilitado() && (resource.data.conv == 'general' || request.auth.token.email.lower() in resource.data.miembros);",
+"      allow read: if habilitado() && (resource.data.dueno == 'general' || resource.data.dueno == request.auth.token.email.lower());",
 "      allow create: if habilitado() && request.resource.data.de == request.auth.token.email.lower();",
 "      allow delete: if habilitado() && resource.data.creado < request.time - duration.value(7, 'd');",
 "    }",
@@ -3875,6 +3882,7 @@ function chatRender(){
   var el=document.getElementById('chat-msgs'); if(!el) return;
   var cerca=(el.scrollHeight-el.scrollTop-el.clientHeight)<80;
   var me=_chatMe(), ms=_chatMsgsDe(_chatConvAct);
+  if(window._chatErr){ el.innerHTML='<div class="chat-vacio" style="color:#c0392b">No se pueden leer los mensajes ('+_chatEsc(window._chatErr)+').<br>Revisá que las reglas de Firestore estén actualizadas (Herramientas &gt; Usuarios).</div>'; return; }
   if(!ms.length){ el.innerHTML='<div class="chat-vacio">Todavía no hay mensajes en esta conversación.</div>'; }
   else el.innerHTML=ms.map(function(m){
     var mine=m.de===me, d=new Date(m.t||Date.now());
