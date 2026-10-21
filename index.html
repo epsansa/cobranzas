@@ -517,6 +517,15 @@ window.usrRenombrar = async function(email, nombre){
   if(el && (window._fbUserEmail||'').toLowerCase()===email){ el.textContent = window.nombreUsuario(email) + (window._ROL==='admin'?'':' · Usuario'); }
 };
 
+window.usrPermisos = async function(email, permEnt, permCar){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador');
+  const d = (await window.usrLeer()) || window._usrDoc;
+  const lista = (d.usuarios||[]).map(function(u){ return u.email===email ? Object.assign({}, u, {permEnt:permEnt||[], permCar:permCar||[]}) : u; });
+  const nd = { adminEmail: d.adminEmail, adminNombre: d.adminNombre||'', usuarios: lista, emails: lista.map(function(u){return u.email;}) };
+  await setDoc(USR_REF, { ...nd, ts: serverTimestamp() });
+  window._usrDoc = nd;
+};
+
 window.usrResetClave = async function(email){
   if(window._ROL!=='admin') throw new Error('Solo el administrador');
   await sendPasswordResetEmail(auth, email);
@@ -887,7 +896,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.13.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.14.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1006,6 +1015,15 @@ body.rol-usuario .solo-admin{display:none!important}
   </div>
 </div></div>
 
+<div class="modal-overlay" id="modalAlcance"><div class="modal" style="max-width:520px">
+  <h3 id="alc-tit">Alcance en Avanzadas</h3>
+  <div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Define qu&#233; entidades y carteras puede ver este usuario en el filtro <strong>Avanzadas</strong>. No cambia la b&#250;squeda de un cliente. Si marc&#225;s entidades y carteras, ve lo que cumpla ambas.</div>
+  <div id="alc-body" style="max-height:48vh;overflow-y:auto"></div>
+  <div class="btn-row">
+    <button class="btn btn-dark" onclick="alcanceGuardar()">Guardar</button>
+    <button class="btn btn-outline" onclick="cerrarModal('modalAlcance')">Cancelar</button>
+  </div>
+</div></div>
 <div class="modal-overlay" id="modalTel"><div class="modal" style="max-width:380px">
   <h3>Agregar tel&#233;fono</h3>
   <div class="fld" style="margin-bottom:12px"><label>N&#250;mero</label><input id="mt-num" placeholder="Ej: 11 5555 1234" onkeydown="if(event.key==='Enter')guardarTelNuevo()" autocomplete="off"></div>
@@ -1343,7 +1361,40 @@ function renderTab(){
 window._advFiltro = window._advFiltro || {ent:'', car:'', est:''};
 window._advFiltroAplicado = window._advFiltroAplicado || false;
 
+// ----- Alcance de usuarios en Avanzadas (entidades / carteras permitidas) -----
+function _advPerm(){
+  if(window.esAdmin()) return null;
+  var d=window._usrDoc||{}, me=String(window._fbUserEmail||'').toLowerCase();
+  var u=(d.usuarios||[]).find(function(x){ return String(x.email||'').toLowerCase()===me; });
+  if(!u) return null;
+  var pe=u.permEnt||[], pc=u.permCar||[];
+  if(!pe.length && !pc.length) return null;
+  return { ent: pe.length?pe:null, car: pc.length?pc:null };
+}
+function _advCredOk(p,cr,c){
+  if(!p) return true;
+  var e=(cr&&cr.entidad)||c.entidad||'', k=(cr&&cr.cartera)||c.cartera||'';
+  return (!p.ent||p.ent.indexOf(e)>=0) && (!p.car||p.car.indexOf(k)>=0);
+}
+function _advClienteOk(p,c){
+  if(!p) return true;
+  var cr=c.creditos||[];
+  if(!cr.length) return _advCredOk(p,null,c);
+  return cr.some(function(x){ return _advCredOk(p,x,c); });
+}
+// carteras que puede ver el usuario: si tiene entidades limitadas, solo las de esas entidades
+function _advCarterasLista(P){
+  var base=(DB.carteras||[]).filter(function(x){ return !P||!P.car||P.car.indexOf(x)>=0; });
+  if(!P||!P.ent) return base;
+  var universo=window._todosClientesCache||DB.clientes, ok={};
+  universo.forEach(function(c){
+    (c.creditos||[]).forEach(function(cr){ if(cr.cartera && P.ent.indexOf(cr.entidad||c.entidad||'')>=0) ok[cr.cartera]=1; });
+    if(c.cartera && P.ent.indexOf(c.entidad||'')>=0) ok[c.cartera]=1;
+  });
+  return base.filter(function(x){ return ok[x]; });
+}
 function renderAvanzada(){
+  const P=_advPerm();
   const f=window._advFiltro;
   const estOpts=(DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto']).map(e=>'<option'+(e===f.est?' selected':'')+'>'+e+'</option>').join('');
   let carOpts, carLabel;
@@ -1355,21 +1406,22 @@ function renderAvanzada(){
       if((c.entidad||'')===f.ent && c.cartera) carterasDeEntidad.add(c.cartera);
     });
     carLabel='Todas de '+f.ent;
-    carOpts=[...carterasDeEntidad].sort().map(x=>'<option'+(x===f.car?' selected':'')+'>'+x+'</option>').join('');
+    carOpts=[...carterasDeEntidad].filter(x=>!P||!P.car||P.car.indexOf(x)>=0).sort().map(x=>'<option'+(x===f.car?' selected':'')+'>'+x+'</option>').join('');
   }else{
     carLabel='Todas';
-    carOpts=DB.carteras.map(x=>'<option'+(x===f.car?' selected':'')+'>'+x+'</option>').join('');
+    carOpts=_advCarterasLista(P).map(x=>'<option'+(x===f.car?' selected':'')+'>'+x+'</option>').join('');
   }
   const html=`
   <div class="card">
     <div class="card-hdr"><div class="card-title">Filtros avanzados</div>
       <button class="btn btn-outline btn-sm solo-admin" onclick="abrirConfig()">&#9881;&#65039; Config entidades</button>
     </div>
+    ${P?'<div style="font-size:11px;color:#854F0B;margin:2px 0 8px">Acceso limitado a &mdash; Entidades: '+(P.ent?P.ent.join(', '):'todas')+' &middot; Carteras: '+(P.car?P.car.join(', '):'todas')+'</div>':''}
     <div class="adv-filters">
       <div class="fld"><label>Entidad</label>
         <select id="adv-ent" onchange="filtrarCarterasPorEntidad();aplicarAvanzada()">
           <option value="">Todas</option>
-          ${DB.entidades.map(e=>'<option'+(e===f.ent?' selected':'')+'>'+e+'</option>').join('')}
+          ${DB.entidades.filter(e=>!P||!P.ent||P.ent.indexOf(e)>=0).map(e=>'<option'+(e===f.ent?' selected':'')+'>'+e+'</option>').join('')}
         </select>
       </div>
       <div class="fld"><label>Cartera</label>
@@ -1393,12 +1445,13 @@ function renderAvanzada(){
 }
 
 function filtrarCarterasPorEntidad(){
+  const P=_advPerm();
   const ent=document.getElementById('adv-ent').value;
   const selCar=document.getElementById('adv-car');
   if(!selCar) return;
   const valorActual=selCar.value;
   if(!ent){
-    selCar.innerHTML='<option value="">Todas</option>'+DB.carteras.map(function(x){return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>';}).join('');
+    selCar.innerHTML='<option value="">Todas</option>'+_advCarterasLista(P).map(function(x){return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>';}).join('');
     return;
   }
   const universo=window._todosClientesCache||DB.clientes;
@@ -1409,7 +1462,7 @@ function filtrarCarterasPorEntidad(){
     });
     if((c.entidad||'')===ent && c.cartera) carterasDeEntidad.add(c.cartera);
   });
-  selCar.innerHTML='<option value="">Todas de '+ent+'</option>'+[...carterasDeEntidad].sort().map(function(x){return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>';}).join('');
+  selCar.innerHTML='<option value="">Todas de '+ent+'</option>'+[...carterasDeEntidad].filter(function(x){return !P||!P.car||P.car.indexOf(x)>=0;}).sort().map(function(x){return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>';}).join('');
 }
 
 function aplicarAvanzada(){
@@ -1418,8 +1471,10 @@ function aplicarAvanzada(){
   const est=document.getElementById('adv-est').value;
   window._advFiltro={ent:ent,car:car,est:est};
   window._advFiltroAplicado=true;
+  const P=_advPerm();
   const universo=window._todosClientesCache||DB.clientes;
   const fil=universo.filter(c=>{
+    if(!_advClienteOk(P,c)) return false;
     const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
     return enEnt && enCar && (!est||c.estado===est);
@@ -1428,8 +1483,8 @@ function aplicarAvanzada(){
   window._advFilas=fil.map(function(c){
     let moraMin=null;
     const todosCr=c.creditos||[];
-    let credFil=todosCr.filter(function(cr){ return (!ent||(cr.entidad||c.entidad)===ent) && (!car||cr.cartera===car); });
-    if(!credFil.length) credFil=todosCr; // datos viejos sin entidad/cartera por crédito
+    let credFil=todosCr.filter(function(cr){ return (!ent||(cr.entidad||c.entidad)===ent) && (!car||cr.cartera===car) && _advCredOk(P,cr,c); });
+    if(!credFil.length) credFil=todosCr.filter(function(cr){ return _advCredOk(P,cr,c); }); // datos viejos sin entidad/cartera por crédito
     credFil.forEach(function(cr){ const d=parseFechaFlex(cr.fecha); if(d && (!moraMin||d<moraMin)) moraMin=d; });
     return { c:c, mora:moraMin,
       cartera:(c.creditos&&c.creditos[0]&&c.creditos[0].cartera)||c.cartera||'',
@@ -2852,6 +2907,7 @@ function renderHerramientas(){
     <div class="tb" onclick="setTabHerr('duplicados',this)">&#128465; Limpiar duplicados</div>
     <div class="tb" onclick="setTabHerr('importtel',this)">&#128222; Importar Tel/Tr&#225;mites</div>
     <div class="tb" onclick="setTabHerr('usuarios',this)">&#128101; Usuarios</div>
+    <div class="tb" onclick="setTabHerr('actividad',this)">&#128202; Actividad</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
   renderImportar();
@@ -2866,6 +2922,7 @@ function setTabHerr(tab,el){
   else if(tab==='backup') renderBackupTab();
   else if(tab==='importtel') renderImportarTelTramites();
   else if(tab==='usuarios') renderUsuarios();
+  else if(tab==='actividad') renderActividad();
   else if(tab==='duplicados') renderLimpiarDuplicados();
   else if(tab==='mantenimiento'){
     if(!window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
@@ -3781,7 +3838,7 @@ async function renderUsuarios(){
   const lista=d.usuarios||[];
   const total=1+lista.length, max=window.usrMax||5;
   const filas=lista.map(function(u){
-    return '<tr><td>'+_escU(u.nombre||'—')+' <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU(u.email)+'" data-n="'+_escU(u.nombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(u.email)+'</td><td><span class="badge bp">Agregar y consultar</span></td>'+
+    return '<tr><td>'+_escU(u.nombre||'—')+' <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU(u.email)+'" data-n="'+_escU(u.nombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(u.email)+'</td><td><span class="badge bp">Agregar y consultar</span><div style="font-size:11px;color:#666;margin-top:4px">Avanzadas: '+_alcResumen(u)+' <button class="btn btn-outline btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosAlcance(this.dataset.m)">🔒 Alcance</button></div></td>'+
       '<td style="white-space:nowrap"><button class="btn btn-outline btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosReset(this.dataset.m)">Enviar cambio de clave</button> '+
       '<button class="btn btn-red btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosQuitar(this.dataset.m)">Quitar</button></td></tr>';
   }).join('');
@@ -3966,6 +4023,166 @@ function chatAbrirCliente(id){
   if(!c){ alert('No se encontró ese cliente (puede haber sido eliminado).'); return; }
   setMod('admin',document.querySelector('.modnav .mb'));
   selCliente(id); setTabAdmin('datos');
+}
+
+
+// ===================================================
+// ALCANCE DE USUARIOS EN AVANZADAS (solo administrador)
+// ===================================================
+function _alcResumen(u){
+  var pe=u.permEnt||[], pc=u.permCar||[];
+  if(!pe.length && !pc.length) return 'todas';
+  var t=[]; if(pe.length) t.push('Ent: '+pe.join(', ')); if(pc.length) t.push('Cart: '+pc.join(', '));
+  return _escU(t.join(' · '));
+}
+var _alcMail=null;
+function usuariosAlcance(mail){
+  var d=window._usrDoc||{}, u=(d.usuarios||[]).find(function(x){return x.email===mail;})||{};
+  _alcMail=mail;
+  var pe=u.permEnt||[], pc=u.permCar||[];
+  function bloque(clave,titulo,lista,sel){
+    return '<div style="margin-bottom:14px"><div class="card-title" style="margin-bottom:6px">'+titulo+'</div>'+
+      '<label style="display:block;font-size:13px;margin-bottom:6px"><input type="checkbox" id="alc-'+clave+'-todas" '+(sel.length?'':'checked')+' onchange="alcanceToggle(\''+clave+'\')"> <strong>Todas</strong></label>'+
+      '<div id="alc-'+clave+'-lista" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;'+(sel.length?'':'opacity:.45;')+'">'+
+      (lista.length?lista.map(function(x){ return '<label style="font-size:12px"><input type="checkbox" class="alc-'+clave+'" value="'+_escU(x)+'" '+(sel.indexOf(x)>=0?'checked':'')+(sel.length?'':' disabled')+'> '+_escU(x)+'</label>'; }).join(''):'<span style="font-size:12px;color:#999">Sin datos cargados</span>')+
+      '</div></div>';
+  }
+  document.getElementById('alc-tit').textContent='Alcance en Avanzadas — '+(u.nombre||mail);
+  document.getElementById('alc-body').innerHTML=bloque('ent','Entidades',DB.entidades||[],pe)+bloque('car','Carteras',DB.carteras||[],pc);
+  document.getElementById('modalAlcance').classList.add('open');
+}
+function alcanceToggle(clave){
+  var todas=document.getElementById('alc-'+clave+'-todas').checked;
+  var cont=document.getElementById('alc-'+clave+'-lista');
+  cont.style.opacity=todas?'.45':'1';
+  cont.querySelectorAll('input').forEach(function(i){ i.disabled=todas; if(todas) i.checked=false; });
+}
+async function alcanceGuardar(){
+  function leer(clave){
+    if(document.getElementById('alc-'+clave+'-todas').checked) return [];
+    return Array.prototype.map.call(document.querySelectorAll('.alc-'+clave+':checked'),function(i){return i.value;});
+  }
+  var pe=leer('ent'), pc=leer('car');
+  if(!document.getElementById('alc-ent-todas').checked && !pe.length){ alert('Elegí al menos una entidad o marcá Todas.'); return; }
+  if(!document.getElementById('alc-car-todas').checked && !pc.length){ alert('Elegí al menos una cartera o marcá Todas.'); return; }
+  try{ await window.usrPermisos(_alcMail,pe,pc); cerrarModal('modalAlcance'); renderUsuarios(); }
+  catch(e){ alert('No se pudo guardar: '+(e.message||e)); }
+}
+
+// ===================================================
+// ACTIVIDAD POR USUARIO (solo administrador)
+// Una "cuenta tocada" = un cliente con al menos un tramite cargado ese dia por el usuario.
+// ===================================================
+function _isoLocal(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function renderActividad(){
+  var el=document.getElementById('herrContent'); if(!el) return;
+  var hoy=_isoLocal(new Date());
+  el.innerHTML='<div class="card"><div class="card-hdr"><div class="card-title">Actividad por usuario</div></div>'+
+    '<div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Cuenta cada cliente con al menos un tr&#225;mite cargado por el usuario en el d&#237;a. Los tr&#225;mites viejos sin usuario figuran como "Sin usuario".</div>'+
+    '<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">'+
+      '<div class="fld"><label>Desde</label><input type="date" id="act-desde" value="'+hoy+'"></div>'+
+      '<div class="fld"><label>Hasta</label><input type="date" id="act-hasta" value="'+hoy+'"></div>'+
+      '<button class="btn btn-dark" onclick="calcActividad()">Ver actividad</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="actRango(0)">Hoy</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="actRango(1)">Ayer</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="actRango(7)">&#218;ltimos 7 d&#237;as</button>'+
+      '<button class="btn btn-green btn-sm" onclick="exportarActividad()">&#128229; Exportar Excel</button>'+
+    '</div><div id="act-res" style="margin-top:14px"></div><div id="act-det" style="margin-top:14px"></div></div>';
+  calcActividad();
+}
+function actRango(n){
+  var h=new Date(), d=new Date();
+  if(n===1){ d.setDate(h.getDate()-1); h=new Date(d); }
+  else if(n===7){ d.setDate(h.getDate()-6); }
+  document.getElementById('act-desde').value=_isoLocal(d);
+  document.getElementById('act-hasta').value=_isoLocal(h);
+  calcActividad();
+}
+async function calcActividad(){
+  var res=document.getElementById('act-res'); if(!res) return;
+  var d1=document.getElementById('act-desde').value, d2=document.getElementById('act-hasta').value;
+  if(!d1||!d2){ res.innerHTML='<div style="color:#c00">Elegí las fechas.</div>'; return; }
+  var desde=new Date(d1+'T00:00:00'), hasta=new Date(d2+'T23:59:59');
+  if(desde>hasta){ res.innerHTML='<div style="color:#c00">La fecha "desde" no puede ser posterior a "hasta".</div>'; return; }
+  if(!window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
+    res.innerHTML='<div style="color:#aaa;font-size:12px">Cargando clientes…</div>';
+    try{ await window.obtenerTodosClientes(); }catch(e){}
+  }
+  var universo=window._todosClientesCache||DB.clientes;
+  var datos={}, filas=[];
+  universo.forEach(function(c){
+    (c.tramites||[]).forEach(function(t){
+      var f=parseFechaFlex(t.fechaHora); if(!f||f<desde||f>hasta) return;
+      var u=String(t.user||'').toLowerCase()||'(sin usuario)';
+      var dia=_isoLocal(f);
+      var hm=String(t.fechaHora||'').match(/(\d{1,2}):(\d{2})/);
+      var hora=hm?(String(hm[1]).padStart(2,'0')+':'+hm[2]):'';
+      var U=datos[u]||(datos[u]={dias:{}});
+      var D=U.dias[dia]||(U.dias[dia]={cuentas:{},tramites:0,estados:0,horas:[]});
+      var C=D.cuentas[c.id]||(D.cuentas[c.id]={id:c.id,nombre:c.nombre||'',dni:c.dni||'',n:0,tipos:{},horas:[]});
+      C.n++; C.tipos[t.tipo||'—']=(C.tipos[t.tipo||'—']||0)+1; if(hora) C.horas.push(hora);
+      D.tramites++; if(t.estadoCambio) D.estados++; if(hora) D.horas.push(hora);
+      filas.push({fecha:dia,usuario:u,cliente:c.nombre||'',dni:c.dni||'',hora:hora,tipo:t.tipo||'',estado:t.estadoCambio||'',nota:t.nota||''});
+    });
+  });
+  window._actDatos={datos:datos,filas:filas,d1:d1,d2:d2};
+  var nom=function(u){ return u==='(sin usuario)'?'Sin usuario':window.nombreUsuario(u); };
+  var usuarios=Object.keys(datos).sort();
+  if(!usuarios.length){ res.innerHTML='<div style="color:#999;font-size:13px;padding:10px 0">No hay trámites cargados en ese período.</div>'; document.getElementById('act-det').innerHTML=''; return; }
+  var dias={}; usuarios.forEach(function(u){ Object.keys(datos[u].dias).forEach(function(k){ dias[k]=1; }); });
+  var diasOrd=Object.keys(dias).sort().reverse();
+  var unDia=(d1===d2);
+  var h='<div class="card-title" style="margin-bottom:6px">Resumen del período</div><table class="tbl"><thead><tr><th>Usuario</th><th>Días activos</th><th>Cuentas distintas</th><th>Cuentas por día (prom.)</th><th>Trámites</th><th>Cambios de estado</th>'+(unDia?'<th>Primer trámite</th><th>Último trámite</th>':'')+'</tr></thead><tbody>';
+  usuarios.forEach(function(u){
+    var ds=Object.keys(datos[u].dias), cuentas={}, tr=0, es=0, horas=[], sumCuentas=0;
+    ds.forEach(function(k){ var D=datos[u].dias[k]; var n=Object.keys(D.cuentas).length; sumCuentas+=n; Object.keys(D.cuentas).forEach(function(i){cuentas[i]=1;}); tr+=D.tramites; es+=D.estados; horas=horas.concat(D.horas); });
+    horas.sort();
+    h+='<tr><td><strong>'+_escU(nom(u))+'</strong></td><td>'+ds.length+'</td><td>'+Object.keys(cuentas).length+'</td><td>'+(sumCuentas/ds.length).toFixed(1)+'</td><td>'+tr+'</td><td>'+es+'</td>'+(unDia?'<td>'+(horas[0]||'—')+'</td><td>'+(horas[horas.length-1]||'—')+'</td>':'')+'</tr>';
+  });
+  h+='</tbody></table>';
+  h+='<div class="card-title" style="margin:16px 0 6px">Cuentas tocadas por día <span style="font-weight:400;color:#888;text-transform:none">(clic en un número para ver el detalle)</span></div><table class="tbl"><thead><tr><th>Día</th>'+usuarios.map(function(u){return '<th>'+_escU(nom(u))+'</th>';}).join('')+'</tr></thead><tbody>';
+  diasOrd.forEach(function(k){
+    var p=k.split('-');
+    h+='<tr><td>'+p[2]+'/'+p[1]+'/'+p[0]+'</td>'+usuarios.map(function(u){
+      var D=datos[u].dias[k];
+      if(!D) return '<td style="color:#ccc">—</td>';
+      return '<td><a href="#" style="color:#2557a7;font-weight:600" data-u="'+_escU(u)+'" data-k="'+k+'" onclick="actDetalle(this.dataset.u,this.dataset.k);return false">'+Object.keys(D.cuentas).length+'</a> <span style="color:#999;font-size:11px">('+D.tramites+' trám.)</span></td>';
+    }).join('')+'</tr>';
+  });
+  h+='</tbody></table>';
+  res.innerHTML=h;
+  document.getElementById('act-det').innerHTML='';
+}
+function actDetalle(u,k){
+  var D=((window._actDatos||{}).datos||{})[u]; D=D&&D.dias[k]; if(!D) return;
+  var p=k.split('-'), nombre=(u==='(sin usuario)'?'Sin usuario':window.nombreUsuario(u));
+  var lista=Object.keys(D.cuentas).map(function(i){return D.cuentas[i];}).sort(function(a,b){ return (a.horas[0]||'')<(b.horas[0]||'')?-1:1; });
+  document.getElementById('act-det').innerHTML='<div class="card-title" style="margin-bottom:6px">'+_escU(nombre)+' — '+p[2]+'/'+p[1]+'/'+p[0]+' ('+lista.length+' cuentas)</div>'+
+    '<table class="tbl"><thead><tr><th>Cliente</th><th>DNI</th><th>Trámites</th><th>Tipos</th><th>Horas</th><th></th></tr></thead><tbody>'+
+    lista.map(function(c){
+      return '<tr><td>'+_escU(c.nombre)+'</td><td>'+_escU(c.dni)+'</td><td>'+c.n+'</td><td style="font-size:11px">'+Object.keys(c.tipos).map(function(t){return _escU(t)+' ×'+c.tipos[t];}).join(', ')+'</td><td style="font-size:11px">'+c.horas.join(', ')+'</td>'+
+        '<td><button class="btn btn-outline btn-sm" data-id="'+_escU(c.id)+'" onclick="chatAbrirCliente(this.dataset.id)">Abrir</button></td></tr>';
+    }).join('')+'</tbody></table>';
+  document.getElementById('act-det').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function exportarActividad(){
+  if(!window.soloAdmin()) return;
+  var A=window._actDatos; if(!A||!A.filas.length){ alert('Primero elegí un período con actividad.'); return; }
+  var nom=function(u){ return u==='(sin usuario)'?'Sin usuario':window.nombreUsuario(u); };
+  var resumen=[];
+  Object.keys(A.datos).sort().forEach(function(u){
+    Object.keys(A.datos[u].dias).sort().forEach(function(k){
+      var D=A.datos[u].dias[k], hs=D.horas.slice().sort();
+      resumen.push({Fecha:k.split('-').reverse().join('/'),Usuario:nom(u),'Cuentas tocadas':Object.keys(D.cuentas).length,'Trámites':D.tramites,'Cambios de estado':D.estados,'Primer trámite':hs[0]||'','Último trámite':hs[hs.length-1]||''});
+    });
+  });
+  var detalle=A.filas.slice().sort(function(a,b){ return (a.fecha+a.hora)<(b.fecha+b.hora)?-1:1; }).map(function(f){
+    return {Fecha:f.fecha.split('-').reverse().join('/'),Hora:f.hora,Usuario:nom(f.usuario),Cliente:f.cliente,DNI:f.dni,Tipo:f.tipo,'Estado nuevo':f.estado,Detalle:f.nota};
+  });
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(resumen),'Resumen por día');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(detalle),'Detalle');
+  XLSX.writeFile(wb,'actividad_'+A.d1+'_a_'+A.d2+'.xlsx');
 }
 
 // ===================================================
