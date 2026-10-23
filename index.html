@@ -904,7 +904,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.14.1</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.14.2</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1917,6 +1917,13 @@ function copiarResumenDS(){
   });
 }
 // -- TAB TRAMITES --
+// El administrador puede editar cualquier trámite. Un usuario, solo el ULTIMO que cargó él mismo en ese cliente.
+function _puedeEditarTramite(c,idx){
+  if(window.esAdmin()) return true;
+  var me=String(window._fbUserEmail||'').toLowerCase(), trs=(c&&c.tramites)||[], ult=-1;
+  for(var i=trs.length-1;i>=0;i--){ if(String(trs[i].user||'').toLowerCase()===me){ ult=i; break; } }
+  return ult>=0 && ult===idx;
+}
 function renderTramites(){
   var c=clienteActivo;
   var trs=(c.tramites||[]).slice().reverse();
@@ -1940,8 +1947,8 @@ function renderTramites(){
       if(i===0) html+=' <span style="font-size:9px;color:#4a8a1a;margin-left:5px">&#9679; &Uacute;LTIMO</span>';
       html+='</div>';
       html+='<div style="display:flex;align-items:center;gap:8px">';
-      html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+(t.user?' &middot; '+String(window.nombreUsuario(t.user)).replace(/</g,'&lt;'):'')+'</span>';
-      html+='<button class="btn btn-outline btn-sm solo-admin" onclick="editarTramite('+idxReal+')" title="Editar">&#9998;</button>';
+      html+='<span class="tr-fecha">'+fmtDMAHora(t.fechaHora)+(t.user?' &middot; '+String(window.nombreUsuario(t.user)).replace(/</g,'&lt;'):'')+(t.editadoEl?' &middot; editado':'')+'</span>';
+      if(_puedeEditarTramite(c,idxReal)) html+='<button class="btn btn-outline btn-sm" onclick="editarTramite('+idxReal+')" title="Editar'+(window.esAdmin()?'':' tu último trámite')+'">&#9998;</button>';
       html+='<button class="btn btn-red btn-sm solo-admin" onclick="eliminarTramite('+idxReal+')" title="Eliminar">&#10005;</button>';
       html+='</div></div>';
       html+='<div class="tr-nota">'+t.nota+'</div>';
@@ -2591,6 +2598,8 @@ function exportarSubdiarioExcel(){
 
 // -- TRÁMITES --
 function abrirTramite(){
+  document.querySelector('#modalTr h3').textContent='Nuevo Tr\u00e1mite';
+  var _bg=document.querySelector('#modalTr .btn-dark'); _bg.textContent='Guardar tr\u00e1mite'; _bg.onclick=guardarTramite;
   var estados=window.DB.estados||DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
   var opts='<option value="">-- Sin cambio --</option>';
   estados.forEach(function(e){ opts+='<option>'+e+'</option>'; });
@@ -2641,6 +2650,7 @@ function eliminarTramite(idx){
 function editarTramite(idx){
   const t=(clienteActivo.tramites||[])[idx];
   if(!t) return;
+  if(!_puedeEditarTramite(clienteActivo,idx)){ alert('Solo podés modificar el último trámite que cargaste vos en este cliente.'); return; }
   // Reusar el modal de tramite existente, precargando los datos
   var estados=window.DB.estados||DB.estados||["Pendiente","En acuerdo","Cancelado","Sin contacto"];
   var opts='<option value="">-- Sin cambio --</option>';
@@ -2663,11 +2673,18 @@ function guardarEdicionTramite(idx){
   const tel=document.getElementById('tr-tel').value.trim();
   const est=document.getElementById('tr-est').value;
   const ci=idxClienteActivo();
+  if(!_puedeEditarTramite(DB.clientes[ci],idx)){ alert('Solo podés modificar el último trámite que cargaste vos en este cliente.'); return; }
   const t=DB.clientes[ci].tramites[idx];
   t.nota=nota;
   t.tipo=document.getElementById('tr-tipo').value;
   t.tel=tel||null;
-  if(est){ t.estadoCambio=est; DB.clientes[ci].estado=est; }
+  t.editadoPor=window._fbUserEmail||''; t.editadoEl=new Date().toISOString();
+  if(est){
+    t.estadoCambio=est;
+    // el estado del cliente solo se pisa si este trámite es el último que definió un estado
+    var posteriorConEstado=(DB.clientes[ci].tramites||[]).some(function(x,i){ return i>idx && x.estadoCambio; });
+    if(window.esAdmin() || !posteriorConEstado) DB.clientes[ci].estado=est;
+  }
   clienteActivo=DB.clientes[ci];
   saveDB(clienteActivo);
   // Restaurar modal a modo nuevo
@@ -3867,7 +3884,7 @@ async function renderUsuarios(){
       filas+
     '</tbody></table>'+form+
     '<div style="margin-top:16px;font-size:12px;color:#666;line-height:1.5"><strong>Los usuarios pueden:</strong> consultar clientes, cuentas, tr\u00e1mites, b\u00fasquedas, comercios y subdiario; agregar tr\u00e1mites (y con ellos cambiar el estado del cliente), editar observaciones y agregar tel\u00e9fonos, mails y datos de referencia.<br>'+
-    '<strong>No pueden:</strong> crear clientes, cr\u00e9ditos ni comercios, exportar, usar Herramientas, editar ni eliminar datos ya cargados, registrar pagos, armar planes ni tocar la configuraci\u00f3n.</div>'+
+    '<strong>No pueden:</strong> crear clientes, cr\u00e9ditos ni comercios, exportar, usar Herramientas, editar ni eliminar datos ya cargados (salvo su \u00faltimo tr\u00e1mite en cada cliente), registrar pagos, armar planes ni tocar la configuraci\u00f3n.</div>'+
   '<div class="card" style="margin-top:12px">'+
     '<div class="card-title" style="margin-bottom:6px">Reglas de seguridad de Firestore (recomendado)</div>'+
     '<div style="font-size:12px;color:#666;margin-bottom:8px;line-height:1.5">Las restricciones de la pantalla se refuerzan en el servidor con estas reglas: impiden que un usuario elimine clientes o cambie la lista de usuarios aunque use otra herramienta. Se pegan en Firebase → Firestore Database → Reglas → Publicar. <strong>Publicalas después de haber ingresado vos una vez con esta versión</strong> (así queda registrada la lista de usuarios). Si tenés otras colecciones en las reglas, conservalas.</div>'+
@@ -4201,7 +4218,7 @@ function exportarActividad(){
 // (la pantalla oculta los botones; esto bloquea tambien cualquier llamada directa)
 // ===================================================
 ['abrirNuevoCliente','guardarCliente','abrirNuevoCredito','guardarCredito','abrirModalComercioConsulta','guardarComercioConsulta','eliminarCliente','abrirEditarCliente','eliminarCredito','abrirEditarCredito','abrirPlan','guardarPlan',
- 'toggleCuota','deshacerPagoCuota','confirmarPago','eliminarTramite','editarTramite','guardarEdicionTramite',
+ 'toggleCuota','deshacerPagoCuota','confirmarPago','eliminarTramite',
  'abrirConfig','agregarEstado','elimEstado','agregarEntidad','elimEntidad','agregarCartera','elimCartera',
  'cambiarEstadoCliente','delTel','delMail','delRef','toggleWspTel','eliminarComercioConsulta',
  'exportarExcel','exportarResultadoAvanzada','exportarSubdiarioExcel','ejecutarExportar','exportarExcelClientes',
