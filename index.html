@@ -406,6 +406,14 @@ async function cargarDatos(){
       return window._cargandoClientesPromesa;
     };
 
+    // Trae SOLO lo que cambió en la nube desde la ultima sincronizacion (cambios de otros usuarios).
+    // Es barato: no vuelve a bajar toda la base. Lo usa la pestaña Actividad.
+    window.sincronizarCambios = async function(){
+      const loc=await _IDB.leerTodo(); const m=loc&&loc.meta;
+      if(loc && m && m.lastTs>0 && loc.clientes.length>0) return descargaIncremental(loc.clientes,m);
+      return window.obtenerTodosClientes(true);
+    };
+
     // Botón "⟳ Sincronizar" — fuerza traer todo de nuevo (ignora la caché)
     window.refrescarClientes = async function(){
       actualizarIndicador('conectando');
@@ -896,7 +904,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.14.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.14.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -4104,10 +4112,12 @@ async function calcActividad(){
   if(!d1||!d2){ res.innerHTML='<div style="color:#c00">Elegí las fechas.</div>'; return; }
   var desde=new Date(d1+'T00:00:00'), hasta=new Date(d2+'T23:59:59');
   if(desde>hasta){ res.innerHTML='<div style="color:#c00">La fecha "desde" no puede ser posterior a "hasta".</div>'; return; }
-  if(!window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
-    res.innerHTML='<div style="color:#aaa;font-size:12px">Cargando clientes…</div>';
-    try{ await window.obtenerTodosClientes(); }catch(e){}
-  }
+  // traer lo que cargaron los otros usuarios desde que se abrio el sistema
+  res.innerHTML='<div style="color:#aaa;font-size:12px">Actualizando datos de todos los usuarios…</div>';
+  try{
+    if(typeof window.sincronizarCambios==='function') await window.sincronizarCambios();
+    else if(typeof window.obtenerTodosClientes==='function') await window.obtenerTodosClientes();
+  }catch(e){ console.warn('Actividad: no se pudo actualizar', e); }
   var universo=window._todosClientesCache||DB.clientes;
   var datos={}, filas=[];
   universo.forEach(function(c){
@@ -4150,6 +4160,7 @@ async function calcActividad(){
     }).join('')+'</tr>';
   });
   h+='</tbody></table>';
+  var _n=new Date(); h+='<div style="font-size:11px;color:#9aa5b8;margin-top:8px">Datos actualizados a las '+String(_n.getHours()).padStart(2,'0')+':'+String(_n.getMinutes()).padStart(2,'0')+'.</div>';
   res.innerHTML=h;
   document.getElementById('act-det').innerHTML='';
 }
