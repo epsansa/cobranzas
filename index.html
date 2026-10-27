@@ -551,7 +551,8 @@ window.chatDetener = function(){
 window.chatIniciar = function(email){
   window.chatDetener();
   const me = String(email||'').toLowerCase();
-  let mapG = {}, mapD = {};
+  let mapG = {}, mapD = {}, gotG = false, gotD = false;
+  window._chatListo = false;
   const borrando = new Set();
   function limpiarViejos(){
     // los mensajes de mas de 7 dias se eliminan (los borra cualquiera que los vea; las reglas lo permiten solo si son viejos)
@@ -571,13 +572,14 @@ window.chatIniciar = function(email){
   }
   function rebuild(){
     window._chatMsgs = Object.assign({}, mapG, mapD);
+    window._chatListo = gotG && gotD;
     limpiarViejos();
     if(window.chatRender) window.chatRender();
   }
-  const err = function(e){ console.warn('chat:', e.code||e.message); window._chatErr = e.code||e.message; if(window.chatRender) window.chatRender(); };
+  const err = function(e){ console.warn('chat:', e.code||e.message); window._chatErr = e.code||e.message; gotG = gotD = true; if(window.chatRender) window.chatRender(); };
   window._chatUnsubs = [
-    onSnapshot(query(MSG_COL, where('dueno','==','general')), function(s){ window._chatErr=''; mapG={}; s.forEach(function(d){ mapG[d.id]=d.data(); }); rebuild(); }, err),
-    onSnapshot(query(MSG_COL, where('dueno','==',me)), function(s){ window._chatErr=''; mapD={}; s.forEach(function(d){ mapD[d.id]=d.data(); }); rebuild(); }, err)
+    onSnapshot(query(MSG_COL, where('dueno','==','general')), function(s){ window._chatErr=''; gotG=true; mapG={}; s.forEach(function(d){ mapG[d.id]=d.data(); }); rebuild(); }, err),
+    onSnapshot(query(MSG_COL, where('dueno','==',me)), function(s){ window._chatErr=''; gotD=true; mapD={}; s.forEach(function(d){ mapD[d.id]=d.data(); }); rebuild(); }, err)
   ];
 };
 window.chatEnviar = async function(conv, texto, cli){
@@ -904,7 +906,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.14.2</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.15.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -922,7 +924,7 @@ body.rol-usuario .solo-admin{display:none!important}
 </div>
 
 <div id="chat-panel">
-  <div class="chat-hdr"><span>&#128172; Chat</span><button onclick="chatToggle()" title="Cerrar">&#10005;</button></div>
+  <div class="chat-hdr"><span>&#128172; Chat</span><span><button id="chat-sonido" onclick="chatSonidoToggle()" title="Sonido de mensajes nuevos">&#128276;</button><button onclick="chatToggle()" title="Cerrar">&#10005;</button></span></div>
   <div class="chat-chips" id="chat-chips"></div>
   <div class="chat-msgs" id="chat-msgs"></div>
   <div class="chat-foot">
@@ -3969,6 +3971,49 @@ function _chatHora(t){
   if(d.toDateString()===hoy.toDateString()) return h;
   return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+' '+h;
 }
+// ----- Sonido de mensaje nuevo -----
+var _chatAudio=null, _chatVistos={}, _chatTituloOrig=document.title, _chatTituloN=0;
+function _chatSonidoOn(){ try{ return localStorage.getItem('epsan_chat_sonido')!=='0'; }catch(e){ return true; } }
+function _chatAudioInit(){
+  try{
+    if(!_chatAudio){ var AC=window.AudioContext||window.webkitAudioContext; if(AC) _chatAudio=new AC(); }
+    if(_chatAudio && _chatAudio.state==='suspended') _chatAudio.resume();
+  }catch(e){}
+}
+// los navegadores solo permiten sonido despues de que la persona hizo clic o toco una tecla una vez
+document.addEventListener('click',_chatAudioInit);
+document.addEventListener('keydown',_chatAudioInit);
+function _chatBeep(){
+  try{
+    _chatAudioInit(); if(!_chatAudio) return;
+    var t0=_chatAudio.currentTime;
+    [[880,0],[1319,0.13]].forEach(function(n){
+      var o=_chatAudio.createOscillator(), g=_chatAudio.createGain();
+      o.type='sine'; o.frequency.value=n[0];
+      g.gain.setValueAtTime(0.0001,t0+n[1]); g.gain.exponentialRampToValueAtTime(0.25,t0+n[1]+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+n[1]+0.22);
+      o.connect(g); g.connect(_chatAudio.destination); o.start(t0+n[1]); o.stop(t0+n[1]+0.25);
+    });
+  }catch(e){}
+}
+function _chatDetectarNuevos(){
+  var me=_chatMe(), all=window._chatMsgs||{}, nuevos=0;
+  Object.keys(all).forEach(function(id){
+    if(_chatVistos[id]) return;
+    _chatVistos[id]=1;
+    if(window._chatListo && all[id].de!==me && (all[id].t||0)>Date.now()-10*60*1000) nuevos++;
+  });
+  if(!nuevos) return;
+  if(_chatSonidoOn()) _chatBeep();
+  if(document.hidden){ _chatTituloN+=nuevos; document.title='('+_chatTituloN+') 💬 '+_chatTituloOrig; }
+}
+document.addEventListener('visibilitychange',function(){ if(!document.hidden){ _chatTituloN=0; document.title=_chatTituloOrig; } });
+function chatSonidoToggle(){
+  var on=!_chatSonidoOn();
+  try{ localStorage.setItem('epsan_chat_sonido',on?'1':'0'); }catch(e){}
+  chatSonidoIcono();
+  if(on) _chatBeep();
+}
+function chatSonidoIcono(){ var b=document.getElementById('chat-sonido'); if(b){ b.innerHTML=_chatSonidoOn()?'&#128276;':'&#128277;'; b.title=_chatSonidoOn()?'Sonido activado (clic para silenciar)':'Sonido silenciado (clic para activar)'; } }
 var _chatMarcando={};
 function _chatMarcarLeidosVisibles(ms){
   if(document.hidden || String(_chatConvAct).indexOf('dm:')!==0) return;
@@ -3979,6 +4024,8 @@ function _chatMarcarLeidosVisibles(ms){
   window.chatMarcarLeidos(ids).catch(function(e){ ids.forEach(function(id){ delete _chatMarcando[id]; }); console.warn('chat: no se pudo marcar leido', e.code||e.message); });
 }
 function chatRender(){
+  _chatDetectarNuevos();
+  chatSonidoIcono();
   var convs=_chatConvs();
   var total=0; convs.forEach(function(c){ c.nl=_chatNoLeidos(c.id); total+=c.nl; });
   var b=document.getElementById('chat-badge'), btn=document.getElementById('chat-btn');
