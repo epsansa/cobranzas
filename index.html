@@ -612,6 +612,41 @@ window.chatMarcarLeidos = async function(ids){
   await b.commit();
 };
 
+// -- PLANTILLAS Y DATOS DE PAGO (documento sistema/plantillas) --
+const PLANT_REF = doc(db_fs, "sistema", "plantillas");
+window._plantDoc = null;
+window.plantillasGuardar = async function(obj){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador');
+  const d = { pago: obj.pago||{}, plantillas: obj.plantillas||[] };
+  await setDoc(PLANT_REF, { ...d, ts: serverTimestamp() });
+  window._plantDoc = d;
+};
+
+// -- COMPROBANTES (coleccion "comprobantes": un documento por archivo, ya comprimido) --
+window.compSubir = async function(id, o){
+  await setDoc(doc(db_fs,"comprobantes",id), Object.assign({}, o, { ts: serverTimestamp() }));
+};
+window.compObtener = async function(id){
+  const sn = await getDoc(doc(db_fs,"comprobantes",id));
+  return sn.exists() ? sn.data() : null;
+};
+window.compBorrar = async function(id){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador puede eliminar comprobantes');
+  await deleteDoc(doc(db_fs,"comprobantes",id));
+};
+
+// -- ESTADO DEL BACKUP (documento sistema/backup: cuando se hizo el ultimo, desde cualquier PC) --
+const BK_REF = doc(db_fs, "sistema", "backup");
+window.backupEstado = async function(){
+  const sn = await getDoc(BK_REF);
+  return sn.exists() ? sn.data() : null;
+};
+window.backupRegistrar = async function(o){
+  if(window._ROL!=='admin') return;
+  await setDoc(BK_REF, Object.assign({}, o, { ts: serverTimestamp() }));
+};
+
+
 // -- AUTH STATE --
 onAuthStateChanged(auth, async function(user){
   if(user){
@@ -631,6 +666,9 @@ onAuthStateChanged(auth, async function(user){
     window._fbUserEmail=user.email||'';
     mostrarApp();
     window.chatIniciar(user.email);
+    if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} }
+    window._unsubPlant = onSnapshot(PLANT_REF, function(sn){ window._plantDoc = sn.exists()?sn.data():null; }, function(){});
+    if(rol==='admin'){ setTimeout(function(){ if(typeof window.backupAutoIniciar==='function') window.backupAutoIniciar(); },15000); }
     // vigilar la lista de usuarios en vivo: si el administrador te quita, se cierra la sesión al instante
     if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} }
     window._unsubUsr = onSnapshot(USR_REF, async function(sn){
@@ -655,6 +693,8 @@ onAuthStateChanged(auth, async function(user){
     if(window._unsubConfig){ window._unsubConfig(); window._unsubConfig=null; }
     if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} window._unsubUsr=null; }
     if(window.chatDetener) window.chatDetener();
+    if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} window._unsubPlant=null; }
+    window._plantDoc=null;
     window._ROL='usuario';
     mostrarLogin();
   }
@@ -874,7 +914,7 @@ body.rol-usuario .solo-admin{display:none!important}
 .sep{border:none;border-top:1px solid #f0f0ec;margin:10px 0}
 .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#aaa;gap:8px;padding:40px}
 .welcome h2{font-size:17px;color:#2557a7}
-.cuota-row-tbl{display:grid;grid-template-columns:40px 1fr 1fr 1fr 80px;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0ec;font-size:12px}
+.cuota-row-tbl{display:grid;grid-template-columns:40px 1fr 1fr 1fr 112px;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #f0f0ec;font-size:12px}
 .cuota-row-tbl:last-child{border-bottom:none}
 .cuota-pagada{opacity:.5;text-decoration:line-through}
 .adv-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
@@ -906,7 +946,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.15.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.16.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1025,6 +1065,60 @@ body.rol-usuario .solo-admin{display:none!important}
   </div>
 </div></div>
 
+<div class="modal-overlay" id="modalMsg"><div class="modal" style="max-width:660px">
+  <h3 id="msg-tit">Mensaje al cliente</h3>
+  <div class="g2" style="margin-bottom:8px">
+    <div class="fld"><label>Plantilla</label><select id="msg-plant" onchange="msgCambio()"></select></div>
+    <div class="fld"><label>Cuota de referencia</label><select id="msg-cuota" onchange="msgCambio()"></select></div>
+  </div>
+  <div class="fld" style="margin-bottom:8px"><label id="msg-dest-l">Tel&#233;fono</label>
+    <input id="msg-dest" list="msg-dest-list" oninput="msgDestInfo()" autocomplete="off">
+    <datalist id="msg-dest-list"></datalist>
+    <div id="msg-dest-info" style="font-size:11px;color:#888;margin-top:3px"></div>
+  </div>
+  <div class="fld" id="msg-asunto-w" style="display:none;margin-bottom:8px"><label>Asunto</label><input id="msg-asunto"></div>
+  <div class="fld"><label>Mensaje (pod&#233;s editarlo antes de enviarlo)</label>
+    <textarea id="msg-txt" style="width:100%;box-sizing:border-box;height:220px;padding:9px;border:1px solid #ddd;border-radius:8px;font:13px Arial;resize:vertical;outline:none"></textarea>
+  </div>
+  <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:8px 0"><input type="checkbox" id="msg-reg" checked> Registrar como tr&#225;mite al copiar o enviar</label>
+  <div class="btn-row" style="flex-wrap:wrap">
+    <button class="btn btn-dark" onclick="msgCopiar()">Copiar texto</button>
+    <button class="btn btn-green" id="msg-btn-wsp" onclick="msgAbrirWsp()">Abrir WhatsApp</button>
+    <button class="btn btn-green" id="msg-btn-mail" style="display:none" onclick="msgAbrirMail()">Abrir mail</button>
+    <button class="btn btn-outline" onclick="msgImagen()">&#128179; Imagen de pago</button>
+    <button class="btn btn-outline" onclick="cerrarModal('modalMsg')">Cerrar</button>
+  </div>
+</div></div>
+<div class="modal-overlay" id="modalPagoImg"><div class="modal" style="max-width:520px">
+  <h3 id="pi-tit">Datos de pago</h3>
+  <div style="text-align:center;background:#eef3fa;border-radius:10px;padding:8px;margin-bottom:10px"><canvas id="pi-canvas" style="max-width:100%;max-height:56vh;border-radius:8px"></canvas></div>
+  <div class="fld" style="margin-bottom:8px"><label>Tel&#233;fono del cliente (para abrir su chat de WhatsApp)</label>
+    <input id="pi-tel" list="pi-tel-list" oninput="piTelInfo()" autocomplete="off"><datalist id="pi-tel-list"></datalist>
+    <div id="pi-tel-info" style="font-size:11px;color:#888;margin-top:3px"></div>
+  </div>
+  <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:6px 0"><input type="checkbox" id="pi-reg" checked> Registrar como tr&#225;mite al copiar o enviar</label>
+  <div class="btn-row" style="flex-wrap:wrap">
+    <button class="btn btn-dark" onclick="piCopiarImagen()">Copiar imagen</button>
+    <button class="btn btn-outline" onclick="piCopiarTexto()">Copiar texto</button>
+    <button class="btn btn-green" onclick="piWsp()">Abrir WhatsApp</button>
+    <button class="btn btn-outline" onclick="piDescargar()">Descargar</button>
+    <button class="btn btn-outline" onclick="cerrarModal('modalPagoImg')">Cerrar</button>
+  </div>
+  <div style="font-size:11px;color:#888;margin-top:8px">Copi&#225; la imagen, abr&#237; el chat y pegala (Ctrl+V). WhatsApp no permite adjuntarla autom&#225;ticamente desde un enlace.</div>
+</div></div>
+<div class="modal-overlay" id="modalComp"><div class="modal" style="max-width:560px">
+  <h3 id="cp-tit">Comprobantes</h3>
+  <div id="cp-lista" style="margin-bottom:10px"></div>
+  <input type="file" id="cp-file" accept="image/*,application/pdf" style="display:none" onchange="compAdjuntar(event)">
+  <button class="btn btn-dark" id="cp-btn" onclick="document.getElementById('cp-file').click()">&#128206; Adjuntar comprobante</button>
+  <span id="cp-msg" style="font-size:12px;margin-left:8px"></span>
+  <div style="font-size:11px;color:#888;margin-top:8px">Se aceptan fotos (se comprimen solas) y PDF de hasta 700 KB.</div>
+  <div class="btn-row"><button class="btn btn-outline" onclick="cerrarModal('modalComp')">Cerrar</button></div>
+</div></div>
+<div id="bk-banner" style="display:none;position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:180;background:#fff4d6;border:1px solid #e8c030;color:#6b4e00;border-radius:10px;padding:9px 14px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.18);max-width:92vw">
+  &#9888;&#65039; <strong>Backup autom&#225;tico pendiente.</strong> <button class="btn btn-dark btn-sm" onclick="hacerBackup()">Hacer backup ahora</button> <button class="btn btn-outline btn-sm" onclick="document.getElementById('bk-banner').style.display='none'">M&#225;s tarde</button>
+</div>
+<div id="toast-msg" style="display:none;position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:400;background:#1a3a6b;color:#fff;border-radius:20px;padding:9px 18px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.25)"></div>
 <div class="modal-overlay" id="modalAlcance"><div class="modal" style="max-width:520px">
   <h3 id="alc-tit">Alcance en Avanzadas</h3>
   <div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Define qu&#233; entidades y carteras puede ver este usuario en el filtro <strong>Avanzadas</strong>. No cambia la b&#250;squeda de un cliente. Si marc&#225;s entidades y carteras, ve lo que cumpla ambas.</div>
@@ -1597,7 +1691,7 @@ function renderDatos(){
   return `
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <h2 style="font-size:16px">${c.nombre||'Sin nombre'} <span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}" style="font-size:11px;padding:3px 9px">${c.estado||'Pendiente'}</span></h2>
-    <button class="btn btn-outline btn-sm solo-admin" onclick="abrirEditarCliente('${c.id}')">✏️ Editar</button>
+    <div style="display:flex;gap:6px"><button class="btn btn-green btn-sm" onclick="abrirMensaje()">&#128172; Mensaje</button><button class="btn btn-outline btn-sm solo-admin" onclick="abrirEditarCliente('${c.id}')">✏️ Editar</button></div>
   </div>
   <div class="card">
     <div class="card-title" style="margin-bottom:10px">Datos personales</div>
@@ -1648,6 +1742,7 @@ function renderCuenta(){
           <div style="font-size:11px;color:#888;margin-top:2px">${cr.comercio||'—'} · Mora: ${fmtDMA(cr.fecha)||'—'} · Entidad: <strong>${cr.entidad||'—'}</strong> · Cartera: <strong>${cr.cartera||'—'}</strong></div>
         </div>
         <div style="display:flex;gap:6px">
+          <button class="btn btn-green btn-sm" onclick="abrirMensaje()">&#128172; Mensaje</button>
           <button class="btn btn-outline btn-sm solo-admin" onclick="abrirEditarCredito(${i})">✏️</button>
         </div>
       </div>
@@ -1700,6 +1795,10 @@ function renderCuenta(){
               '<div>'+
               (p.pagadaParcial?'<div style="font-size:10px;color:#854F0B;margin-bottom:2px">Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR')+'</div>':'')+ 
               '<button class="btn btn-sm solo-admin '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
+              '<div style="display:flex;gap:4px;margin-top:3px">'+
+                (p.pagada?'':'<button class="btn btn-outline btn-sm" style="padding:2px 6px" title="Datos de pago (imagen para WhatsApp)" onclick="abrirPagoCuota('+i+','+pi+')">&#128179;</button>')+
+                '<button class="btn btn-outline btn-sm" style="padding:2px 6px" title="Comprobantes adjuntos" onclick="abrirComprobantes('+i+','+pi+')">&#128206;'+((p.comprobantes&&p.comprobantes.length)?'<b style="color:#1a7a3d;margin-left:2px">'+p.comprobantes.length+'</b>':'')+'</button>'+
+              '</div>'+
               '</div>'+
             '</div>';
           }).join('');
@@ -2935,6 +3034,7 @@ function renderHerramientas(){
     <div class="tb" onclick="setTabHerr('importtel',this)">&#128222; Importar Tel/Tr&#225;mites</div>
     <div class="tb" onclick="setTabHerr('usuarios',this)">&#128101; Usuarios</div>
     <div class="tb" onclick="setTabHerr('actividad',this)">&#128202; Actividad</div>
+    <div class="tb" onclick="setTabHerr('plantillas',this)">&#128172; Plantillas y pago</div>
   </div>
   <div class="tabcontent" id="herrContent"></div>`;
   renderImportar();
@@ -2950,6 +3050,7 @@ function setTabHerr(tab,el){
   else if(tab==='importtel') renderImportarTelTramites();
   else if(tab==='usuarios') renderUsuarios();
   else if(tab==='actividad') renderActividad();
+  else if(tab==='plantillas') renderPlantillasAdmin();
   else if(tab==='duplicados') renderLimpiarDuplicados();
   else if(tab==='mantenimiento'){
     if(!window._todosClientesCache && typeof window.obtenerTodosClientes==='function'){
@@ -2962,30 +3063,6 @@ function setTabHerr(tab,el){
   else renderMantenimiento();
 }
 
-function renderBackupTab(){
-  const total=(window._todosClientesCache||DB.clientes).length;
-  const now=new Date().toLocaleString('es-AR');
-  document.getElementById('herrContent').innerHTML=`
-  <div class="card">
-    <div class="card-title" style="margin-bottom:12px">Hacer Backup</div>
-    <p style="font-size:13px;color:#555;margin-bottom:6px">Genera un archivo <strong>.json</strong> con todos los datos del sistema incluyendo tramites. El nombre del archivo incluye fecha y hora exacta.</p>
-    <div style="background:#f5f5f3;border-radius:8px;padding:12px;margin:12px 0;font-size:13px">
-      <div><strong>${total}</strong> clientes en la base actual</div>
-      <div style="font-size:11px;color:#888;margin-top:3px">${now}</div>
-    </div>
-    <button class="btn btn-dark" onclick="hacerBackup()">Descargar Backup</button>
-  </div>
-  <div class="card">
-    <div class="card-title" style="margin-bottom:12px">Restaurar Backup</div>
-    <p style="font-size:13px;color:#555;margin-bottom:12px">Carga un archivo .json de backup para restaurar todos los datos. <span style="color:#791F1F;font-weight:500">Reemplaza la base actual.</span></p>
-    <div class="dropzone" onclick="document.getElementById('bkFileIn').click()" style="border-color:#f0b0b0">
-      <div style="font-size:28px;margin-bottom:8px">📂</div>
-      <div style="font-weight:600;font-size:13px">Clic para seleccionar archivo de backup</div>
-      <div style="font-size:11px;margin-top:4px">Formato: .json (backup_epsan_FECHA.json)</div>
-    </div>
-    <input type="file" id="bkFileIn" accept=".json" style="display:none" onchange="restaurarBackup(event)">
-  </div>`;
-}
 
 function renderImportar(){
   document.getElementById('herrContent').innerHTML=`
@@ -3361,24 +3438,6 @@ function exportarExcel(){ exportarExcelClientes(window._todosClientesCache||DB.c
 // ===================================================
 // BACKUP Y RESTAURAR
 // ===================================================
-async function hacerBackup(){
-  const btn=document.querySelector('#herrContent button[onclick="hacerBackup()"]');
-  if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
-  try{
-    const todos=await window.obtenerTodosClientes();
-    const now=new Date(); const pad=n=>String(n).padStart(2,'0');
-    const fecha=`${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
-    const backup={version:'2.0',fecha:now.toLocaleString('es-AR'),usuario:window._fbUserEmail||'',
-      clientes:todos,entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios||[],estados:DB.estados||[]};
-    const blob=new Blob([JSON.stringify(backup)],{type:'application/json'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob); a.download=`backup_epsan_${fecha}.json`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(a.href),5000);
-  }catch(err){ alert('No se pudo generar el backup: '+err.message); }
-  if(btn){ btn.disabled=false; btn.textContent='Descargar Backup'; }
-}
-
 function restaurarBackup(e){
   const file = e.target.files[0]; if(!file) return;
   const reader = new FileReader();
@@ -3838,7 +3897,20 @@ const REGLAS_FIRESTORE = [
 "      allow write: if esAdmin();",
 "    }",
 "    match /sistema/{doc} {",
-"      allow read, write: if habilitado();",
+"      allow read: if habilitado();",
+"      allow write: if habilitado() && doc != 'plantillas' && doc != 'backup';",
+"    }",
+"    match /sistema/plantillas {",
+"      allow read: if habilitado();",
+"      allow write: if esAdmin();",
+"    }",
+"    match /sistema/backup {",
+"      allow read: if habilitado();",
+"      allow write: if esAdmin();",
+"    }",
+"    match /comprobantes/{id} {",
+"      allow read, create: if habilitado();",
+"      allow delete: if esAdmin();",
 "    }",
 "    match /mensajes/{id} {",
 "      allow read: if habilitado() && (resource.data.dueno == 'general' || resource.data.dueno == request.auth.token.email.lower());",
@@ -3885,7 +3957,7 @@ async function renderUsuarios(){
       '<tr><td><strong>'+_escU(d.adminNombre||'Administrador')+'</strong> <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU((d.adminEmail||'').toLowerCase())+'" data-n="'+_escU(d.adminNombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(d.adminEmail)+'</td><td><span class="badge ba">Todos los permisos</span></td><td></td></tr>'+
       filas+
     '</tbody></table>'+form+
-    '<div style="margin-top:16px;font-size:12px;color:#666;line-height:1.5"><strong>Los usuarios pueden:</strong> consultar clientes, cuentas, tr\u00e1mites, b\u00fasquedas, comercios y subdiario; agregar tr\u00e1mites (y con ellos cambiar el estado del cliente), editar observaciones y agregar tel\u00e9fonos, mails y datos de referencia.<br>'+
+    '<div style="margin-top:16px;font-size:12px;color:#666;line-height:1.5"><strong>Los usuarios pueden:</strong> consultar clientes, cuentas, tr\u00e1mites, b\u00fasquedas, comercios y subdiario; agregar tr\u00e1mites (y con ellos cambiar el estado del cliente), editar observaciones, agregar tel\u00e9fonos, mails y datos de referencia, armar mensajes y datos de pago, y adjuntar o descargar comprobantes.<br>'+
     '<strong>No pueden:</strong> crear clientes, cr\u00e9ditos ni comercios, exportar, usar Herramientas, editar ni eliminar datos ya cargados (salvo su \u00faltimo tr\u00e1mite en cada cliente), registrar pagos, armar planes ni tocar la configuraci\u00f3n.</div>'+
   '<div class="card" style="margin-top:12px">'+
     '<div class="card-title" style="margin-bottom:6px">Reglas de seguridad de Firestore (recomendado)</div>'+
@@ -4260,6 +4332,621 @@ function exportarActividad(){
   XLSX.writeFile(wb,'actividad_'+A.d1+'_a_'+A.d2+'.xlsx');
 }
 
+
+// ===================================================
+// UTILIDADES COMUNES
+// ===================================================
+var _toastT=null;
+function _toast(msg){
+  var el=document.getElementById('toast-msg'); if(!el) return;
+  el.textContent=msg; el.style.display='block';
+  clearTimeout(_toastT); _toastT=setTimeout(function(){ el.style.display='none'; },3200);
+}
+function _copiarTexto(txt,okMsg){
+  function fb(){ var t=document.createElement('textarea'); t.value=txt; t.style.position='fixed'; t.style.opacity='0'; document.body.appendChild(t); t.select(); try{ document.execCommand('copy'); }catch(e){} t.remove(); _toast(okMsg); }
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){ _toast(okMsg); },fb); } else fb();
+}
+function _fm(n){ return '$ '+Math.round(parseFloat(n)||0).toLocaleString('es-AR'); }
+function _tituloNombre(s){ return String(s||'').toLowerCase().replace(/(^|\s)(\S)/g,function(m,a,b){ return a+b.toUpperCase(); }); }
+// Numero de telefono tal como lo cargo la persona (sin textos agregados como "(tramite 21/10/2026)")
+function _telLimpio(t){ return String(t||'').replace(/\([^)]*[A-Za-zÁ-ú][^)]*\)/g,'').trim(); }
+// Arma el numero internacional para el enlace de WhatsApp (Argentina): 549 + codigo de area + numero, sin 0 ni 15
+function _waNum(t){
+  var d=String(_telLimpio(t)).replace(/\D/g,'');
+  if(!d) return '';
+  if(d.indexOf('549')===0 && d.length>=12) return d;
+  if(d.indexOf('54')===0 && d.length>=12) return '549'+d.slice(2);
+  d=d.replace(/^0+/,'');
+  if(d.length===12){ for(var a=2;a<=4;a++){ if(d.substr(a,2)==='15'){ d=d.slice(0,a)+d.slice(a+2); break; } } }
+  if(d.length===11 && d.charAt(0)==='9') return '54'+d;
+  if(d.length===10) return '549'+d;
+  return '';
+}
+function _telsCliente(c){
+  var w=c.telsWsp||[], tels=(c.telefonos||[]).map(_telLimpio).filter(Boolean);
+  var con=tels.filter(function(t){ return w.indexOf(t)>=0; }), sin=tels.filter(function(t){ return w.indexOf(t)<0; });
+  return con.concat(sin);
+}
+function _infoTel(inputId,infoId){
+  var v=document.getElementById(inputId).value, el=document.getElementById(infoId); if(!el) return;
+  if(!v.trim()){ el.style.color='#888'; el.textContent=''; return; }
+  var n=_waNum(v);
+  if(n){ el.style.color='#27500A'; el.textContent='WhatsApp: +'+n.slice(0,2)+' '+n.slice(2,3)+' '+n.slice(3); }
+  else { el.style.color='#c0392b'; el.textContent='No se pudo armar el número de WhatsApp. Revisá que tenga código de área (ej: 11 5555 1234).'; }
+}
+// Registra un trámite automático por el mensaje enviado (una sola vez por ventana abierta)
+function _regTramiteAuto(tipo,nota,tel){
+  var idx=idxClienteActivo(); if(idx<0) return;
+  var c=DB.clientes[idx], now=new Date();
+  var fh=fmtDMA(now)+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  if(!c.tramites) c.tramites=[];
+  c.tramites.push({tipo:tipo,fechaHora:fh,nota:nota,tel:tel||null,estadoCambio:null,user:(window._fbUserEmail||'')});
+  clienteActivo=c; saveDB(c);
+  if(typeof tabActiva!=='undefined' && tabActiva==='tramites') setTabAdmin('tramites');
+}
+
+// ===================================================
+// PLANTILLAS DE MENSAJES + DATOS DE PAGO
+// ===================================================
+var PLANT_DEFAULT={
+  pago:{empresa:'EPSAN',alias:'',cbu:'',titular:'',banco:'',wsp:''},
+  plantillas:[
+    {id:'p1',nombre:'Recordatorio de cuota a vencer',canal:'wsp',asunto:'',texto:'Hola {nombre}, te escribimos de {empresa}.\nTe recordamos que tu cuota {cuota_nro} de {producto} vence el {cuota_vto} por {cuota_monto}.\n\nPodés abonar por transferencia al alias *{alias}* (titular {titular_cuenta}). Cuando lo hagas, enviá el comprobante por este chat.\n\nGracias.\n{usuario} – {empresa}'},
+    {id:'p2',nombre:'Cuota vencida',canal:'wsp',asunto:'',texto:'Hola {nombre}, te contactamos de {empresa} por tu {producto} ({entidad}).\nRegistramos {cuotas_vencidas} cuota/s vencida/s. El saldo pendiente es {saldo_total}.\n\n¿Podés comunicarte para acordar una forma de pago? Estamos para ayudarte a regularizar tu situación.\n\n{usuario} – {empresa}'},
+    {id:'p3',nombre:'Propuesta de regularización',canal:'wsp',asunto:'',texto:'Hola {nombre}, te escribimos de {empresa}.\nTenemos una propuesta para regularizar tu deuda de {entidad} ({producto}). El saldo actual es {saldo_total} y podemos analizar un plan de pagos en cuotas según tu posibilidad.\n\n¿Cuándo podemos hablar?\n\n{usuario} – {empresa}'},
+    {id:'p4',nombre:'Datos para transferir',canal:'wsp',asunto:'',texto:'Hola {nombre}, te paso los datos para abonar:\n\n*Importe:* {cuota_monto}\n*Alias:* {alias}\n*CBU/CVU:* {cbu}\n*Titular:* {titular_cuenta}\n*Banco/billetera:* {banco}\n\nEn el concepto de la transferencia poné tu DNI y enviá el comprobante por este chat para registrar tu pago.\n\n{empresa}'},
+    {id:'p5',nombre:'Pago recibido',canal:'wsp',asunto:'',texto:'Hola {nombre}, confirmamos la recepción de tu pago. ¡Muchas gracias!\nCualquier consulta, estamos a disposición.\n\n{usuario} – {empresa}'},
+    {id:'p6',nombre:'Aviso de deuda (mail)',canal:'mail',asunto:'Aviso de deuda – {entidad}',texto:'Estimado/a {nombre}:\n\nNos comunicamos en nombre de {entidad} respecto del crédito {producto} N° {nro_credito}. Al día de la fecha registra un saldo pendiente de {saldo_total}.\n\nPara regularizar su situación puede comunicarse con nosotros o abonar mediante transferencia al alias {alias} (titular {titular_cuenta}), enviándonos luego el comprobante.\n\nSaludos cordiales,\n{usuario}\n{empresa}'}
+  ]
+};
+var PLANT_VARS=['nombre','dni','entidad','cartera','producto','nro_credito','saldo_total','cuotas_vencidas','cuota_nro','cuota_monto','cuota_vto','alias','cbu','titular_cuenta','banco','wsp_empresa','empresa','usuario','hoy'];
+function _plant(){
+  var p=window._plantDoc||{};
+  return {
+    pago:Object.assign({},PLANT_DEFAULT.pago,p.pago||{}),
+    plantillas:(p.plantillas&&p.plantillas.length)?p.plantillas:PLANT_DEFAULT.plantillas
+  };
+}
+// Cuotas impagas de todos los creditos del cliente, ordenadas por vencimiento
+function _cuotasPend(c){
+  var out=[];
+  (c.creditos||[]).forEach(function(cr,i){
+    var n=0;
+    (cr.plan||[]).forEach(function(p,pi){
+      if(!p.esAnticipo) n++;
+      if(p.pagada) return;
+      var monto=p.pagadaParcial?(parseFloat(p.saldo)||0):(parseFloat(p.monto)||0);
+      out.push({i:i,pi:pi,cr:cr,p:p,label:p.esAnticipo?'Anticipo':'C'+n,monto:monto,vto:p.vto||''});
+    });
+  });
+  out.sort(function(a,b){ return String(a.vto)<String(b.vto)?-1:(String(a.vto)>String(b.vto)?1:0); });
+  return out;
+}
+function _msgVars(c,ref){
+  var P=_plant().pago, pend=_cuotasPend(c), hoy=new Date().toISOString().slice(0,10);
+  var venc=pend.filter(function(x){ return x.vto && x.vto<hoy; });
+  var saldo=pend.length?pend.reduce(function(s,x){ return s+x.monto; },0):(c.creditos||[]).reduce(function(s,x){ return s+(parseFloat(x.capital)||0); },0);
+  var cu=ref||pend[0]||null;
+  var cr0=(cu&&cu.cr)||(c.creditos||[])[0]||{};
+  return {
+    nombre:_tituloNombre(c.nombre), dni:c.dni||'', entidad:cr0.entidad||c.entidad||'', cartera:cr0.cartera||c.cartera||'',
+    producto:cr0.producto||'crédito', nro_credito:cr0.num||'', saldo_total:_fm(saldo), cuotas_vencidas:String(venc.length),
+    cuota_nro:cu?cu.label:'', cuota_monto:cu?_fm(cu.monto):'', cuota_vto:(cu&&cu.vto)?fmtDMA(cu.vto):'',
+    alias:P.alias||'', cbu:P.cbu||'', titular_cuenta:P.titular||'', banco:P.banco||'', empresa:P.empresa||'', wsp_empresa:P.wsp||'',
+    usuario:window.nombreUsuario(window._fbUserEmail), hoy:fmtDMA(new Date())
+  };
+}
+// Reemplaza {variables}. Si una linea usa una variable sin valor, esa linea se omite (ej: sin CBU cargado).
+function _msgRender(txt,v){
+  var lineas=String(txt||'').split('\n'), out=[];
+  lineas.forEach(function(l){
+    var vacia=false;
+    var r=l.replace(/\{(\w+)\}/g,function(m,k){
+      if(!Object.prototype.hasOwnProperty.call(v,k)) return m;
+      if(v[k]==='') vacia=true;
+      return v[k];
+    });
+    if(!vacia) out.push(r);
+  });
+  return out.join('\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+
+var _msgRegistrado=false, _msgCli=null;
+function abrirMensaje(){
+  var c=clienteActivo; if(!c){ alert('Abrí un cliente primero.'); return; }
+  _msgCli=c; _msgRegistrado=false;
+  document.getElementById('msg-tit').textContent='Mensaje a '+_tituloNombre(c.nombre);
+  var pl=_plant().plantillas;
+  document.getElementById('msg-plant').innerHTML=pl.map(function(p,i){ return '<option value="'+i+'">'+_escU((p.canal==='mail'?'✉ ':'💬 ')+p.nombre)+'</option>'; }).join('');
+  var pend=_cuotasPend(c);
+  document.getElementById('msg-cuota').innerHTML='<option value="">Automática (próxima pendiente)</option>'+pend.map(function(x,k){
+    return '<option value="'+k+'">'+_escU(x.label+' · '+(x.vto?fmtDMA(x.vto):'s/f')+' · '+_fm(x.monto)+' · '+(x.cr.producto||'Crédito'))+'</option>';
+  }).join('');
+  document.getElementById('msg-reg').checked=true;
+  msgCambio();
+  document.getElementById('modalMsg').classList.add('open');
+}
+function _msgCuotaSel(){
+  var v=document.getElementById('msg-cuota').value; if(v==='') return null;
+  return _cuotasPend(_msgCli)[parseInt(v,10)]||null;
+}
+function msgCambio(){
+  var c=_msgCli, pl=_plant().plantillas[parseInt(document.getElementById('msg-plant').value,10)]||_plant().plantillas[0];
+  var v=_msgVars(c,_msgCuotaSel());
+  var mail=pl.canal==='mail';
+  document.getElementById('msg-txt').value=_msgRender(pl.texto,v);
+  document.getElementById('msg-asunto-w').style.display=mail?'block':'none';
+  if(mail) document.getElementById('msg-asunto').value=_msgRender(pl.asunto||'',v);
+  document.getElementById('msg-btn-wsp').style.display=mail?'none':'inline-block';
+  document.getElementById('msg-btn-mail').style.display=mail?'inline-block':'none';
+  document.getElementById('msg-dest-l').textContent=mail?'Mail':'Teléfono';
+  var lista=mail?(c.mails||[]).map(function(m){ return String(m).trim(); }).filter(Boolean):_telsCliente(c);
+  document.getElementById('msg-dest-list').innerHTML=lista.map(function(x){ return '<option value="'+_escU(x)+'">'; }).join('');
+  document.getElementById('msg-dest').value=lista[0]||'';
+  msgDestInfo();
+}
+function msgDestInfo(){
+  var pl=_plant().plantillas[parseInt(document.getElementById('msg-plant').value,10)]||{};
+  if(pl.canal==='mail'){ var e=document.getElementById('msg-dest-info'); e.textContent=''; return; }
+  _infoTel('msg-dest','msg-dest-info');
+}
+function _msgRegistrar(){
+  if(_msgRegistrado || !document.getElementById('msg-reg').checked) return;
+  var pl=_plant().plantillas[parseInt(document.getElementById('msg-plant').value,10)]||{};
+  _msgRegistrado=true;
+  _regTramiteAuto(pl.canal==='mail'?'Mail':'WhatsApp','Mensaje enviado ('+(pl.nombre||'')+')',pl.canal==='mail'?null:_telLimpio(document.getElementById('msg-dest').value));
+}
+function msgCopiar(){
+  var txt=document.getElementById('msg-txt').value, pl=_plant().plantillas[parseInt(document.getElementById('msg-plant').value,10)]||{};
+  _copiarTexto((pl.canal==='mail'?('Asunto: '+document.getElementById('msg-asunto').value+'\n\n'):'')+txt,'Texto copiado');
+  _msgRegistrar();
+}
+function msgAbrirWsp(){
+  var n=_waNum(document.getElementById('msg-dest').value);
+  if(!n){ alert('No se pudo armar el número de WhatsApp. Revisá que tenga código de área.'); return; }
+  window.open('https://wa.me/'+n+'?text='+encodeURIComponent(document.getElementById('msg-txt').value),'_blank');
+  _msgRegistrar();
+}
+function msgAbrirMail(){
+  var dest=document.getElementById('msg-dest').value.trim();
+  if(!dest){ alert('Elegí o escribí el mail del destinatario.'); return; }
+  window.location.href='mailto:'+encodeURIComponent(dest)+'?subject='+encodeURIComponent(document.getElementById('msg-asunto').value)+'&body='+encodeURIComponent(document.getElementById('msg-txt').value);
+  _msgRegistrar();
+}
+function msgImagen(){
+  var pend=_cuotasPend(_msgCli); if(!pend.length){ alert('Este cliente no tiene cuotas pendientes en un plan de pagos.'); return; }
+  var ref=_msgCuotaSel()||pend[0];
+  abrirPagoCuota(ref.i,ref.pi);
+}
+
+// ----- Administracion de plantillas y datos de pago (solo administrador) -----
+var _tplEdit=null;
+function renderPlantillasAdmin(){
+  var el=document.getElementById('herrContent'); if(!el) return;
+  var cur=_plant();
+  _tplEdit={pago:Object.assign({},cur.pago),plantillas:JSON.parse(JSON.stringify(cur.plantillas)),sel:0};
+  var P=_tplEdit.pago;
+  function campo(id,lbl,val,ph){ return '<div class="fld"><label>'+lbl+'</label><input id="tpl-'+id+'" value="'+_escU(val||'')+'" placeholder="'+_escU(ph||'')+'"></div>'; }
+  el.innerHTML=
+  '<div class="card"><div class="card-title" style="margin-bottom:6px">Datos de pago</div>'+
+    '<div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Se usan en los mensajes y en la imagen de pago de cada cuota.</div>'+
+    '<div class="g2" style="max-width:760px">'+campo('empresa','Nombre de la empresa',P.empresa,'EPSAN')+campo('alias','Alias para transferir',P.alias,'epsan.cobranzas')+
+      campo('cbu','CBU / CVU (opcional)',P.cbu)+campo('titular','Titular de la cuenta',P.titular)+campo('banco','Banco / billetera (opcional)',P.banco)+campo('wsp','WhatsApp de la empresa (para comprobantes)',P.wsp,'11 5555 1234')+'</div>'+
+    '<div class="btn-row"><button class="btn btn-dark" onclick="tplGuardarPago()">Guardar datos de pago</button></div></div>'+
+  '<div class="card"><div class="card-title" style="margin-bottom:6px">Plantillas de mensajes</div>'+
+    '<div style="font-size:12px;color:#666;margin-bottom:8px;line-height:1.5">Elegí una para editarla. Las variables entre llaves se reemplazan con los datos de cada cliente. Si una variable no tiene valor, esa línea no aparece.</div>'+
+    '<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px"><div class="fld" style="min-width:260px"><label>Plantilla</label><select id="tpl-sel" onchange="tplSel()"></select></div>'+
+      '<button class="btn btn-outline btn-sm" onclick="tplNueva()">+ Nueva</button><button class="btn btn-red btn-sm" onclick="tplEliminar()">Eliminar</button><button class="btn btn-outline btn-sm" onclick="tplRestaurar()">Restaurar originales</button></div>'+
+    '<div class="g2" style="max-width:760px;margin-bottom:8px"><div class="fld"><label>Nombre</label><input id="tpl-nombre"></div>'+
+      '<div class="fld"><label>Canal</label><select id="tpl-canal" onchange="tplCanal()"><option value="wsp">WhatsApp</option><option value="mail">Mail</option></select></div></div>'+
+    '<div class="fld" id="tpl-asunto-w" style="max-width:760px;margin-bottom:8px;display:none"><label>Asunto</label><input id="tpl-asunto"></div>'+
+    '<div class="fld" style="max-width:760px"><label>Texto</label><textarea id="tpl-texto" style="width:100%;box-sizing:border-box;height:200px;padding:9px;border:1px solid #ddd;border-radius:8px;font:13px Arial;resize:vertical;outline:none"></textarea></div>'+
+    '<div style="margin:8px 0;font-size:11px;color:#666">Variables (clic para insertar): '+PLANT_VARS.map(function(v){ return '<a href="#" style="display:inline-block;margin:2px 3px;padding:1px 7px;background:#eef3fa;border-radius:10px;color:#2557a7;text-decoration:none" onclick="tplInsertar(\'{'+v+'}\');return false">{'+v+'}</a>'; }).join('')+'<br>Referencia de cuota: <code>cuota_nro</code>, <code>cuota_monto</code>, <code>cuota_vto</code> usan la cuota elegida al armar el mensaje (o la próxima pendiente).</div>'+
+    '<div class="btn-row"><button class="btn btn-dark" onclick="tplGuardar()">Guardar plantilla</button></div></div>';
+  tplLlenarSel(); tplMostrar();
+}
+function tplLlenarSel(){
+  var s=document.getElementById('tpl-sel'); if(!s) return;
+  s.innerHTML=_tplEdit.plantillas.map(function(p,i){ return '<option value="'+i+'"'+(i===_tplEdit.sel?' selected':'')+'>'+_escU((p.canal==='mail'?'✉ ':'💬 ')+p.nombre)+'</option>'; }).join('');
+}
+function tplMostrar(){
+  var p=_tplEdit.plantillas[_tplEdit.sel]; if(!p){ return; }
+  document.getElementById('tpl-nombre').value=p.nombre||''; document.getElementById('tpl-canal').value=p.canal||'wsp';
+  document.getElementById('tpl-asunto').value=p.asunto||''; document.getElementById('tpl-texto').value=p.texto||'';
+  tplCanal();
+}
+function tplCanal(){ document.getElementById('tpl-asunto-w').style.display=document.getElementById('tpl-canal').value==='mail'?'block':'none'; }
+function tplSel(){ _tplEdit.sel=parseInt(document.getElementById('tpl-sel').value,10)||0; tplMostrar(); }
+function tplInsertar(v){
+  var t=document.getElementById('tpl-texto'), a=t.selectionStart||0, b=t.selectionEnd||0;
+  t.value=t.value.slice(0,a)+v+t.value.slice(b); t.focus(); t.selectionStart=t.selectionEnd=a+v.length;
+}
+function _tplPersistir(msg){
+  return window.plantillasGuardar({pago:_tplEdit.pago,plantillas:_tplEdit.plantillas}).then(function(){ _toast(msg); }).catch(function(e){ alert('No se pudo guardar: '+(e.message||e)); });
+}
+function tplGuardarPago(){
+  ['empresa','alias','cbu','titular','banco','wsp'].forEach(function(k){ _tplEdit.pago[k]=document.getElementById('tpl-'+k).value.trim(); });
+  _tplPersistir('Datos de pago guardados');
+}
+function tplGuardar(){
+  var p=_tplEdit.plantillas[_tplEdit.sel]; if(!p) return;
+  var nombre=document.getElementById('tpl-nombre').value.trim(); if(!nombre){ alert('Poné un nombre a la plantilla.'); return; }
+  p.nombre=nombre; p.canal=document.getElementById('tpl-canal').value; p.asunto=document.getElementById('tpl-asunto').value; p.texto=document.getElementById('tpl-texto').value;
+  tplLlenarSel(); _tplPersistir('Plantilla guardada');
+}
+function tplNueva(){
+  _tplEdit.plantillas.push({id:'p'+Date.now().toString(36),nombre:'Nueva plantilla',canal:'wsp',asunto:'',texto:'Hola {nombre}, '});
+  _tplEdit.sel=_tplEdit.plantillas.length-1; tplLlenarSel(); tplMostrar();
+}
+function tplEliminar(){
+  if(_tplEdit.plantillas.length<=1){ alert('Tiene que quedar al menos una plantilla.'); return; }
+  var p=_tplEdit.plantillas[_tplEdit.sel]; if(!confirm('¿Eliminar la plantilla "'+p.nombre+'"?')) return;
+  _tplEdit.plantillas.splice(_tplEdit.sel,1); _tplEdit.sel=0; tplLlenarSel(); tplMostrar(); _tplPersistir('Plantilla eliminada');
+}
+function tplRestaurar(){
+  if(!confirm('Se reemplazan TODAS las plantillas por las originales del sistema. ¿Continuar?')) return;
+  _tplEdit.plantillas=JSON.parse(JSON.stringify(PLANT_DEFAULT.plantillas)); _tplEdit.sel=0; tplLlenarSel(); tplMostrar(); _tplPersistir('Plantillas originales restauradas');
+}
+
+// ===================================================
+// IMAGEN DE PAGO POR CUOTA
+// ===================================================
+var _pagoDibujar=(function(){
+  var D={};
+  function fmtFecha(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?m[3]+'/'+m[2]+'/'+m[1]:(iso||''); }
+  function fmtMonto(n){ n=parseFloat(n)||0; return n.toLocaleString('es-AR',{minimumFractionDigits:0,maximumFractionDigits:2}); }
+  function dniMask(x){ var s=String(x||'').replace(/\D/g,''); return s.length>3?'DNI ****'+s.slice(-3):(s?'DNI '+s:''); }
+    // Imagen PNG de los datos de pago (se dibuja con canvas, sin librerías)
+  function rr(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+  function wrap(c,text,x,y,maxW,lh){ var words=String(text).split(' '),line='',yy=y; words.forEach(function(w){ var t=line?line+' '+w:w; if(c.measureText(t).width>maxW&&line){ c.fillText(line,x,yy); line=w; yy+=lh; } else line=t; }); if(line){ c.fillText(line,x,yy); yy+=lh; } return yy; }
+  function dibujar(){
+    var W=1080,H=1500,cv=document.createElement('canvas'); cv.width=W; cv.height=H; var c=cv.getContext('2d');
+    var F='system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif';
+    c.fillStyle='#eef3fa'; c.fillRect(0,0,W,H);
+    c.fillStyle='#fff'; rr(c,50,50,W-100,H-100,40); c.fill();
+    var g=c.createLinearGradient(0,0,W,0); g.addColorStop(0,'#1a3a6b'); g.addColorStop(1,'#2557a7');
+    c.fillStyle=g; rr(c,50,50,W-100,170,40); c.fill(); c.fillRect(50,150,W-100,70);
+    c.fillStyle='#fff'; c.font='700 52px '+F; c.fillText(D.empresa||'EPSAN',110,150);
+    c.font='400 28px '+F; c.fillStyle='#cfe0fa'; c.fillText('Gestión de cobranzas',110,192);
+    var y=290, x=110, mw=W-220;
+    c.fillStyle='#5d6b84'; c.font='400 28px '+F; c.fillText('Titular de la deuda',x,y);
+    c.fillStyle='#14233f'; c.font='700 42px '+F; y=wrap(c,D.nombre,x,y+52,mw,50);
+    c.fillStyle='#5d6b84'; c.font='400 28px '+F; c.fillText(dniMask(D.dni),x,y-4); y+=40;
+    c.fillText(D.concepto,x,y); y+=100;
+    c.fillStyle='#14233f'; c.font='800 120px '+F; c.fillText('$ '+fmtMonto(D.monto),x,y);
+    if(D.vto){ y+=62; c.font='600 32px '+F; c.fillStyle='#1b7a3d'; c.fillText('Vence el '+fmtFecha(D.vto),x,y); }
+    y+=50;
+    var bh=D.cbu||D.titcuenta||D.banco?520:300;
+    c.strokeStyle='#2557a7'; c.lineWidth=4; rr(c,x-20,y,mw+40,bh,28); c.stroke();
+    var yy=y+62; c.fillStyle='#2557a7'; c.font='700 28px '+F; c.fillText('PAGÁ POR TRANSFERENCIA',x,yy);
+    function fila(lbl,val,big){ yy+=62; c.fillStyle='#5d6b84'; c.font='400 26px '+F; c.fillText(lbl,x,yy); yy+=big?60:46; c.fillStyle='#14233f'; c.font=(big?'800 56px ':'700 36px ')+F; c.fillText(val,x,yy); }
+    fila('Alias',D.alias,true);
+    if(D.cbu) fila('CBU / CVU',D.cbu);
+    if(D.titcuenta) fila('Titular de la cuenta',D.titcuenta);
+    if(D.banco) fila('Banco / billetera',D.banco);
+    y=y+bh+70;
+    c.fillStyle='#14233f'; c.font='700 30px '+F; c.fillText('Cómo pagar',x,y);
+    c.fillStyle='#3b4a66'; c.font='400 29px '+F; y+=46;
+    ['1. Transferí el importe al alias indicado.','2. En el concepto escribí tu DNI.','3. Enviá el comprobante por WhatsApp'+(D.wsp?' al '+D.wsp:'')+'.'].forEach(function(l){ c.fillText(l,x,y); y+=46; });
+    c.fillStyle='#8a97ad'; c.font='400 24px '+F; c.fillText('Verificá que el titular de la cuenta coincida con el indicado.',x,H-95);
+    return cv;
+  }
+  return function(d){ D=d; return dibujar(); };
+})();
+var _piCanvas=null, _piD=null, _piCuota=null, _piRegistrado=false;
+function abrirPagoCuota(i,pi){
+  var c=clienteActivo, P=_plant().pago;
+  if(!P.alias){ alert(window.esAdmin()?'Primero cargá el alias y los datos de pago en Herramientas > Plantillas y pago.':'El administrador todavía no cargó los datos de pago.'); return; }
+  var cr=c.creditos[i], p=cr.plan[pi], n=0; cr.plan.forEach(function(x,k){ if(!x.esAnticipo && k<=pi) n++; });
+  var label=p.esAnticipo?'Anticipo':'Cuota C'+n;
+  var monto=p.pagadaParcial?(parseFloat(p.saldo)||0):(parseFloat(p.monto)||0);
+  _piD={nombre:_tituloNombre(c.nombre),dni:c.dni||'',concepto:(cr.producto||'Crédito')+' · '+label+(cr.num?' · N° '+cr.num:''),monto:monto,vto:p.vto||'',
+        alias:P.alias,cbu:P.cbu,titcuenta:P.titular,banco:P.banco,wsp:P.wsp,empresa:P.empresa};
+  _piCuota={label:label,monto:monto,vto:p.vto};
+  _piCanvas=_pagoDibujar(_piD);
+  var cv=document.getElementById('pi-canvas'); cv.width=_piCanvas.width; cv.height=_piCanvas.height; cv.getContext('2d').drawImage(_piCanvas,0,0);
+  document.getElementById('pi-tit').textContent='Datos de pago · '+label+' · '+_fm(monto);
+  var tels=_telsCliente(c);
+  document.getElementById('pi-tel-list').innerHTML=tels.map(function(x){ return '<option value="'+_escU(x)+'">'; }).join('');
+  document.getElementById('pi-tel').value=tels[0]||''; piTelInfo();
+  document.getElementById('pi-reg').checked=true; _piRegistrado=false;
+  document.getElementById('modalPagoImg').classList.add('open');
+}
+function piTelInfo(){ _infoTel('pi-tel','pi-tel-info'); }
+function _piRegistrar(que){
+  if(_piRegistrado || !document.getElementById('pi-reg').checked) return;
+  _piRegistrado=true;
+  _regTramiteAuto('WhatsApp','Datos de pago enviados ('+_piCuota.label+' · '+_fm(_piCuota.monto)+') – '+que,_telLimpio(document.getElementById('pi-tel').value));
+}
+function _piBlob(){ return new Promise(function(res){ _piCanvas.toBlob(res,'image/png'); }); }
+function _piNombreArchivo(){ return 'pago-'+(String((_piD&&_piD.dni)||'cliente').replace(/\D/g,'')||'cliente')+'.png'; }
+function piDescargar(){
+  _piBlob().then(function(b){
+    var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=_piNombreArchivo(); document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); },4000); _toast('Imagen descargada');
+  });
+}
+function piCopiarImagen(){
+  function fallback(b){
+    var f=null; try{ f=new File([b],_piNombreArchivo(),{type:'image/png'}); }catch(e){}
+    if(f&&navigator.canShare&&navigator.canShare({files:[f]})){ navigator.share({files:[f]}).catch(function(){}); }
+    else piDescargar();
+  }
+  if(navigator.clipboard&&window.ClipboardItem){
+    navigator.clipboard.write([new ClipboardItem({'image/png':_piBlob()})])
+      .then(function(){ _toast('Imagen copiada: pegala en el chat de WhatsApp'); _piRegistrar('imagen'); })
+      .catch(function(){ _piBlob().then(fallback); });
+  } else { _piBlob().then(fallback); }
+}
+function piCopiarTexto(){
+  var D=_piD, n=(D.nombre||'').split(' ')[0];
+  var t='Hola '+n+', te paso los datos para abonar:\n\n*Importe:* '+_fm(D.monto)+'\n*Concepto:* '+D.concepto+'\n'+(D.vto?'*Vence:* '+fmtDMA(D.vto)+'\n':'')+
+    '\n*Transferir a:*\n*Alias:* '+D.alias+'\n'+(D.cbu?'*CBU/CVU:* '+D.cbu+'\n':'')+(D.titcuenta?'*Titular:* '+D.titcuenta+'\n':'')+(D.banco?'*Banco/billetera:* '+D.banco+'\n':'')+
+    '\nEn el concepto de la transferencia poné tu DNI y enviá el comprobante por este chat.\n\n'+(D.empresa||'');
+  _copiarTexto(t,'Texto copiado'); _piRegistrar('texto');
+}
+function piWsp(){
+  var n=_waNum(document.getElementById('pi-tel').value);
+  if(!n){ alert('No se pudo armar el número de WhatsApp. Revisá que tenga código de área.'); return; }
+  window.open('https://wa.me/'+n,'_blank'); _piRegistrar('chat abierto');
+}
+
+// ===================================================
+// COMPROBANTES ADJUNTOS A LA CUOTA
+// ===================================================
+var _compCtx=null;
+function _compCuotaObj(){ var c=clienteActivo; return c.creditos[_compCtx.i].plan[_compCtx.pi]; }
+function abrirComprobantes(i,pi){
+  _compCtx={i:i,pi:pi};
+  var cr=clienteActivo.creditos[i], n=0; cr.plan.forEach(function(x,k){ if(!x.esAnticipo && k<=pi) n++; });
+  document.getElementById('cp-tit').textContent='Comprobantes · '+(cr.plan[pi].esAnticipo?'Anticipo':'Cuota C'+n)+' · '+(cr.producto||'Crédito');
+  document.getElementById('cp-msg').textContent='';
+  compRender();
+  document.getElementById('modalComp').classList.add('open');
+}
+function compRender(){
+  var lista=_compCuotaObj().comprobantes||[], el=document.getElementById('cp-lista');
+  if(!lista.length){ el.innerHTML='<div style="color:#999;font-size:13px;padding:6px 0">Todavía no hay comprobantes en esta cuota.</div>'; return; }
+  el.innerHTML=lista.map(function(m){
+    var d=new Date(m.t||Date.now()), f=fmtDMA(d)+' '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+    return '<div style="display:flex;align-items:center;gap:8px;border:1px solid #e1e6ef;border-radius:8px;padding:7px 10px;margin-bottom:6px">'+
+      '<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.tipo==='application/pdf'?'📄 ':'🖼️ ')+_escU(m.nombre)+'</div>'+
+      '<div style="font-size:11px;color:#888">'+f+(m.user?' · '+_escU(window.nombreUsuario(m.user)):'')+'</div></div>'+
+      '<button class="btn btn-outline btn-sm" data-id="'+_escU(m.id)+'" onclick="compVer(this.dataset.id)">Ver</button>'+
+      '<button class="btn btn-outline btn-sm" data-id="'+_escU(m.id)+'" data-n="'+_escU(m.nombre)+'" onclick="compDescargar(this.dataset.id,this.dataset.n)">Descargar</button>'+
+      '<button class="btn btn-red btn-sm solo-admin" data-id="'+_escU(m.id)+'" onclick="compEliminar(this.dataset.id)">✕</button></div>';
+  }).join('');
+}
+// Comprime una foto: lado maximo 1600 px, JPEG; baja la calidad hasta que entre en ~650 KB
+function _imgComprimir(file){
+  return new Promise(function(res,rej){
+    var url=URL.createObjectURL(file), img=new Image();
+    img.onload=function(){
+      var dim=1600, q=0.78, out='';
+      for(var k=0;k<8;k++){
+        var esc=Math.min(1,dim/Math.max(img.width,img.height));
+        var cv=document.createElement('canvas'); cv.width=Math.round(img.width*esc); cv.height=Math.round(img.height*esc);
+        var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height); cx.drawImage(img,0,0,cv.width,cv.height);
+        out=cv.toDataURL('image/jpeg',q);
+        if(out.length<=880000) break;
+        q=Math.max(0.45,q-0.1); dim=Math.round(dim*0.8);
+      }
+      URL.revokeObjectURL(url);
+      if(out.length>900000) rej(new Error('La imagen es demasiado pesada, probá con una captura más chica.')); else res(out);
+    };
+    img.onerror=function(){ URL.revokeObjectURL(url); rej(new Error('No se pudo leer la imagen.')); };
+    img.src=url;
+  });
+}
+function _fileADataUrl(file){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ res(r.result); }; r.onerror=function(){ rej(new Error('No se pudo leer el archivo.')); }; r.readAsDataURL(file); }); }
+async function compAdjuntar(e){
+  var file=e.target.files[0]; e.target.value=''; if(!file) return;
+  var msg=document.getElementById('cp-msg'), btn=document.getElementById('cp-btn');
+  msg.style.color='#888'; msg.textContent='Procesando…'; btn.disabled=true;
+  try{
+    var data, tipo=file.type||'';
+    if(tipo==='application/pdf'){
+      if(file.size>700*1024) throw new Error('El PDF pesa más de 700 KB. Sacale una foto o captura al comprobante.');
+      data=await _fileADataUrl(file);
+    } else if(tipo.indexOf('image/')===0){
+      data=await _imgComprimir(file); tipo='image/jpeg';
+    } else throw new Error('Solo se aceptan fotos o PDF.');
+    var id='k_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+    var nombre=file.name||'comprobante';
+    if(tipo==='image/jpeg' && !/\.jpe?g$/i.test(nombre)) nombre=nombre.replace(/\.[^.]+$/,'')+'.jpg';
+    var idx=idxClienteActivo(), c=DB.clientes[idx], cuota=c.creditos[_compCtx.i].plan[_compCtx.pi];
+    await window.compSubir(id,{clienteId:c.id,nombre:nombre,tipo:tipo,data:data,t:Date.now(),user:(window._fbUserEmail||'')});
+    if(!cuota.comprobantes) cuota.comprobantes=[];
+    cuota.comprobantes.push({id:id,nombre:nombre,tipo:tipo,t:Date.now(),user:(window._fbUserEmail||'')});
+    clienteActivo=c; saveDB(c);
+    msg.style.color='#27500A'; msg.textContent='Comprobante guardado ✓';
+    compRender();
+    if(typeof tabActiva!=='undefined' && tabActiva==='cuenta') setTabAdmin('cuenta');
+  }catch(err){
+    msg.style.color='#c0392b'; msg.textContent=(err&&err.code==='permission-denied')?'Sin permiso: falta actualizar las reglas de Firestore (Herramientas > Usuarios).':(err.message||String(err));
+  }
+  btn.disabled=false;
+}
+async function _compDato(id){
+  var d=await window.compObtener(id);
+  if(!d) throw new Error('El comprobante ya no está disponible.');
+  var b=await (await fetch(d.data)).blob();
+  return {blob:b,d:d};
+}
+async function compVer(id){
+  try{ var r=await _compDato(id); var u=URL.createObjectURL(r.blob); window.open(u,'_blank'); setTimeout(function(){ URL.revokeObjectURL(u); },60000); }
+  catch(e){ alert(e.message||e); }
+}
+async function compDescargar(id,nombre){
+  try{
+    var r=await _compDato(id), a=document.createElement('a'); a.href=URL.createObjectURL(r.blob); a.download=nombre||r.d.nombre||'comprobante';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(a.href); },4000);
+  }catch(e){ alert(e.message||e); }
+}
+async function compEliminar(id){
+  if(!window.soloAdmin()) return;
+  if(!confirm('¿Eliminar este comprobante?')) return;
+  try{
+    await window.compBorrar(id);
+    var idx=idxClienteActivo(), c=DB.clientes[idx], cuota=c.creditos[_compCtx.i].plan[_compCtx.pi];
+    cuota.comprobantes=(cuota.comprobantes||[]).filter(function(m){ return m.id!==id; });
+    clienteActivo=c; saveDB(c); compRender();
+    if(typeof tabActiva!=='undefined' && tabActiva==='cuenta') setTabAdmin('cuenta');
+  }catch(e){ alert('No se pudo eliminar: '+(e.message||e)); }
+}
+
+// ===================================================
+// BACKUP: manual y automatico
+// ===================================================
+function _bkCfg(){
+  var c={auto:true,dias:1,conservar:15};
+  try{ var j=JSON.parse(localStorage.getItem('epsan_bk_cfg')||'null'); if(j) c=Object.assign(c,j); }catch(e){}
+  return c;
+}
+function _bkGuardarCfg(c){ try{ localStorage.setItem('epsan_bk_cfg',JSON.stringify(c)); }catch(e){} }
+function _bkIDB(){
+  return new Promise(function(res,rej){
+    var r=indexedDB.open('epsan_bk',1);
+    r.onupgradeneeded=function(){ r.result.createObjectStore('h'); };
+    r.onsuccess=function(){ res(r.result); };
+    r.onerror=function(){ rej(r.error); };
+  });
+}
+async function _bkGetHandle(){
+  try{
+    var db=await _bkIDB();
+    return await new Promise(function(res){ var q=db.transaction('h').objectStore('h').get('dir'); q.onsuccess=function(){ res(q.result||null); }; q.onerror=function(){ res(null); }; });
+  }catch(e){ return null; }
+}
+async function _bkSetHandle(h){
+  var db=await _bkIDB();
+  return new Promise(function(res,rej){ var tx=db.transaction('h','readwrite'); tx.objectStore('h').put(h,'dir'); tx.oncomplete=function(){ res(); }; tx.onerror=function(){ rej(tx.error); }; });
+}
+async function _bkPermiso(h,pedir){
+  try{
+    var o={mode:'readwrite'};
+    if((await h.queryPermission(o))==='granted') return true;
+    if(pedir && (await h.requestPermission(o))==='granted') return true;
+  }catch(e){}
+  return false;
+}
+async function _bkLimpiarViejos(h,conservar){
+  try{
+    var nombres=[];
+    for await (var par of h.entries()){ if(/^backup_epsan_\d{8}_\d{4}\.json$/.test(par[0])) nombres.push(par[0]); }
+    nombres.sort().reverse();
+    for(var k=conservar;k<nombres.length;k++){ try{ await h.removeEntry(nombres[k]); }catch(e){} }
+  }catch(e){}
+}
+// modo: 'manual' (puede pedir permiso y descargar) | 'auto' (silencioso; si no puede, queda pendiente)
+async function _bkEjecutar(modo){
+  window._bkEnCurso=true;
+  try{
+    if(typeof window.sincronizarCambios==='function'){ try{ await window.sincronizarCambios(); }catch(e){} }
+    var todos=await window.obtenerTodosClientes();
+    var now=new Date(), pad=function(n){ return String(n).padStart(2,'0'); };
+    var fecha=now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+'_'+pad(now.getHours())+pad(now.getMinutes());
+    var nombre='backup_epsan_'+fecha+'.json';
+    var h=await _bkGetHandle(), usarCarpeta=false;
+    if(h) usarCarpeta=await _bkPermiso(h,modo!=='auto');
+    if(!usarCarpeta && modo==='auto') return {ok:false,pendiente:true};
+    var backup={version:'2.0',fecha:now.toLocaleString('es-AR'),usuario:window._fbUserEmail||'',
+      clientes:todos,entidades:DB.entidades,carteras:DB.carteras,comercios:DB.comercios||[],estados:DB.estados||[]};
+    var blob=new Blob([JSON.stringify(backup)],{type:'application/json'});
+    var destino;
+    if(usarCarpeta){
+      var fh=await h.getFileHandle(nombre,{create:true}), w=await fh.createWritable();
+      await w.write(blob); await w.close();
+      await _bkLimpiarViejos(h,_bkCfg().conservar||15);
+      destino='carpeta "'+h.name+'"';
+    } else {
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=nombre; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); },5000);
+      destino='descargas del navegador';
+    }
+    try{ await window.backupRegistrar({ultimo:Date.now(),por:(window._fbUserEmail||''),archivo:nombre,clientes:todos.length,destino:destino,modo:modo}); }catch(e){}
+    var b=document.getElementById('bk-banner'); if(b) b.style.display='none';
+    return {ok:true,nombre:nombre,destino:destino,n:todos.length};
+  }catch(err){
+    return {ok:false,error:err.message||String(err)};
+  }finally{ window._bkEnCurso=false; }
+}
+async function hacerBackup(){
+  var btn=document.querySelector('#herrContent button[data-bk="ahora"]');
+  if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
+  var r=await _bkEjecutar('manual');
+  if(r.ok) _toast('Backup guardado ('+r.n+' clientes) en '+r.destino); else alert('No se pudo generar el backup: '+(r.error||'error desconocido'));
+  if(btn){ btn.disabled=false; btn.textContent='Hacer backup ahora'; }
+  if(document.getElementById('bk-estado')) renderBackupEstado();
+}
+async function backupAutoVerificar(){
+  if(!window.esAdmin() || window._bkEnCurso) return;
+  var cfg=_bkCfg(); if(!cfg.auto) return;
+  if(!window._baseCargada) return; // esperar a que la base este completa
+  var est=null; try{ est=await window.backupEstado(); }catch(e){ return; }
+  var ult=(est&&est.ultimo)||0;
+  if(Date.now()-ult < cfg.dias*864e5-3600e3) return;
+  var r=await _bkEjecutar('auto');
+  if(r.ok){ _toast('Backup automático guardado en '+r.destino); }
+  else if(r.pendiente){ var b=document.getElementById('bk-banner'); if(b) b.style.display='block'; }
+}
+function backupAutoIniciar(){
+  if(window._bkTimer) clearInterval(window._bkTimer);
+  var intentos=0, esperar=setInterval(function(){
+    intentos++;
+    if(window._baseCargada || intentos>40){ clearInterval(esperar); backupAutoVerificar(); }
+  },3000);
+  window._bkTimer=setInterval(backupAutoVerificar,30*60*1000); // por si el sistema queda abierto varios dias
+}
+window.backupAutoIniciar=backupAutoIniciar;
+async function renderBackupEstado(){
+  var el=document.getElementById('bk-estado'); if(!el) return;
+  var est=null; try{ est=await window.backupEstado(); }catch(e){}
+  var h=await _bkGetHandle(), cfg=_bkCfg();
+  var soporta=!!window.showDirectoryPicker;
+  var txt;
+  if(est&&est.ultimo){
+    var d=new Date(est.ultimo), dias=Math.floor((Date.now()-est.ultimo)/864e5);
+    txt='<strong>'+fmtDMA(d)+' '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+'</strong> ('+(dias<1?'hoy':'hace '+dias+' día'+(dias>1?'s':''))+') · '+(est.clientes||'?')+' clientes · '+_escU(est.destino||'')+(est.por?' · '+_escU(window.nombreUsuario(est.por)):'');
+  } else txt='<span style="color:#c0392b">Todavía no se hizo ningún backup.</span>';
+  el.innerHTML='<div style="font-size:13px;margin-bottom:8px">Último backup: '+txt+'</div>'+
+    '<div style="font-size:13px;margin-bottom:8px">Carpeta de destino: '+(h?'<strong>'+_escU(h.name)+'</strong>':'<span style="color:#888">no elegida (se descarga a la carpeta Descargas)</span>')+
+      (soporta?' <button class="btn btn-outline btn-sm" onclick="backupElegirCarpeta()">'+(h?'Cambiar':'Elegir carpeta')+'</button>':' <span style="font-size:11px;color:#888">(este navegador no permite elegir carpeta; usá Chrome o Edge)</span>')+'</div>';
+}
+async function backupElegirCarpeta(){
+  try{
+    var h=await window.showDirectoryPicker({mode:'readwrite'});
+    await _bkSetHandle(h); _toast('Carpeta elegida: '+h.name); renderBackupEstado();
+  }catch(e){ if(e&&e.name!=='AbortError') alert('No se pudo elegir la carpeta: '+(e.message||e)); }
+}
+function backupCfgCambio(){
+  var c=_bkCfg();
+  c.auto=document.getElementById('bk-auto').checked;
+  c.dias=parseInt(document.getElementById('bk-dias').value,10)||1;
+  c.conservar=Math.max(3,Math.min(60,parseInt(document.getElementById('bk-cons').value,10)||15));
+  _bkGuardarCfg(c); _toast('Configuración guardada');
+}
+function renderBackupTab(){
+  var total=(window._todosClientesCache||DB.clientes).length, cfg=_bkCfg();
+  document.getElementById('herrContent').innerHTML=
+  '<div class="card"><div class="card-title" style="margin-bottom:10px">Backup</div>'+
+    '<div style="background:#f5f5f3;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px"><strong>'+total+'</strong> clientes en la base actual</div>'+
+    '<div id="bk-estado" style="margin-bottom:10px">Cargando…</div>'+
+    '<button class="btn btn-dark" data-bk="ahora" onclick="hacerBackup()">Hacer backup ahora</button>'+
+    '<div style="font-size:11px;color:#888;margin-top:6px">Genera un archivo .json con todos los clientes, trámites y listas. El nombre incluye fecha y hora. No incluye los comprobantes adjuntos.</div></div>'+
+  '<div class="card"><div class="card-title" style="margin-bottom:10px">Backup automático</div>'+
+    '<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:10px"><input type="checkbox" id="bk-auto" '+(cfg.auto?'checked':'')+' onchange="backupCfgCambio()"> Hacer el backup automáticamente cuando el administrador abre el sistema</label>'+
+    '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:10px">'+
+      '<div class="fld"><label>Frecuencia</label><select id="bk-dias" onchange="backupCfgCambio()"><option value="1"'+(cfg.dias===1?' selected':'')+'>Todos los días</option><option value="3"'+(cfg.dias===3?' selected':'')+'>Cada 3 días</option><option value="7"'+(cfg.dias===7?' selected':'')+'>Una vez por semana</option></select></div>'+
+      '<div class="fld"><label>Copias a conservar en la carpeta</label><input id="bk-cons" type="number" min="3" max="60" value="'+cfg.conservar+'" style="width:90px" onchange="backupCfgCambio()"></div></div>'+
+    '<div style="font-size:12px;color:#666;line-height:1.55">El navegador no puede trabajar con la computadora apagada: el backup se hace al abrir el sistema (y cada 30 minutos mientras esté abierto) si pasó el plazo desde el último. Con una carpeta elegida se guarda solo, sin avisos; si el navegador pide permiso de nuevo, aparece un aviso amarillo con un botón para hacerlo con un clic. Sin carpeta, el aviso aparece y el archivo se descarga. Los backups más viejos de la carpeta se borran solos según la cantidad que elijas.</div></div>'+
+  '<div class="card"><div class="card-title" style="margin-bottom:12px">Restaurar Backup</div>'+
+    '<p style="font-size:13px;color:#555;margin-bottom:12px">Carga un archivo .json de backup para restaurar todos los datos. <span style="color:#791F1F;font-weight:500">Reemplaza la base actual.</span></p>'+
+    '<div class="dropzone" onclick="document.getElementById(\'bkFileIn\').click()" style="border-color:#f0b0b0"><div style="font-size:28px;margin-bottom:8px">📂</div><div style="font-weight:600;font-size:13px">Clic para seleccionar archivo de backup</div><div style="font-size:11px;margin-top:4px">Formato: .json (backup_epsan_FECHA.json)</div></div>'+
+    '<input type="file" id="bkFileIn" accept=".json" style="display:none" onchange="restaurarBackup(event)"></div>';
+  renderBackupEstado();
+}
+
 // ===================================================
 // PERMISOS: funciones exclusivas del administrador
 // (la pantalla oculta los botones; esto bloquea tambien cualquier llamada directa)
@@ -4271,7 +4958,8 @@ function exportarActividad(){
  'exportarExcel','exportarResultadoAvanzada','exportarSubdiarioExcel','ejecutarExportar','exportarExcelClientes',
  'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
  'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
- 'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs'
+ 'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs',
+ 'tplGuardarPago','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
 ].forEach(function(n){
   var f=window[n];
   if(typeof f!=='function') return;
