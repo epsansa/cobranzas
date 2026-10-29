@@ -946,7 +946,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.17.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.18.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1462,7 +1462,7 @@ function renderTab(){
 // -- TAB AVANZADA --
 // El filtro aplicado (entidad/cartera/estado) se guarda acá para poder
 // restaurarlo cuando el usuario vuelve a esta pestaña después de abrir un cliente.
-window._advFiltro = window._advFiltro || {ent:'', car:'', est:''};
+window._advFiltro = window._advFiltro || {ent:'', car:'', est:'', md:'', mh:''};
 window._advFiltroAplicado = window._advFiltroAplicado || false;
 
 // ----- Alcance de usuarios en Avanzadas (entidades / carteras permitidas) -----
@@ -1539,6 +1539,9 @@ function renderAvanzada(){
           <option value="">Todos</option>${estOpts}
         </select>
       </div>
+      <div class="fld"><label>Fecha de mora desde</label><input type="date" id="adv-md" value="${f.md||''}" onchange="aplicarAvanzada()"></div>
+      <div class="fld"><label>Fecha de mora hasta</label><input type="date" id="adv-mh" value="${f.mh||''}" onchange="aplicarAvanzada()"></div>
+      <button class="btn btn-outline btn-sm" style="margin-bottom:2px" onclick="limpiarMoraAvanzada()">Limpiar fechas</button>
     </div>
     <div id="avanzada-resultado"></div>
   </div>`;
@@ -1569,11 +1572,27 @@ function filtrarCarterasPorEntidad(){
   selCar.innerHTML='<option value="">Todas de '+ent+'</option>'+[...carterasDeEntidad].filter(function(x){return !P||!P.car||P.car.indexOf(x)>=0;}).sort().map(function(x){return '<option'+(x===valorActual?' selected':'')+'>'+x+'</option>';}).join('');
 }
 
+function limpiarMoraAvanzada(){
+  document.getElementById('adv-md').value=''; document.getElementById('adv-mh').value=''; aplicarAvanzada();
+}
+// El cliente entra si alguno de sus creditos (de la entidad/cartera elegidas) tiene fecha de mora dentro del rango
+function _advMoraOk(c,ent,car,md,mh){
+  if(!md && !mh) return true;
+  const d1=md?parseFechaFlex(md):null, d2=mh?parseFechaFlex(mh):null;
+  let crs=(c.creditos||[]).filter(function(cr){ return (!ent||(cr.entidad||c.entidad)===ent) && (!car||cr.cartera===car); });
+  if(!crs.length) crs=c.creditos||[];
+  return crs.some(function(cr){
+    const d=parseFechaFlex(cr.fecha); if(!d) return false;
+    return (!d1||d>=d1) && (!d2||d<=d2);
+  });
+}
 function aplicarAvanzada(){
   const ent=document.getElementById('adv-ent').value;
   const car=document.getElementById('adv-car').value;
   const est=document.getElementById('adv-est').value;
-  window._advFiltro={ent:ent,car:car,est:est};
+  const md=document.getElementById('adv-md')?document.getElementById('adv-md').value:'';
+  const mh=document.getElementById('adv-mh')?document.getElementById('adv-mh').value:'';
+  window._advFiltro={ent:ent,car:car,est:est,md:md,mh:mh};
   window._advFiltroAplicado=true;
   const P=_advPerm();
   const universo=window._todosClientesCache||DB.clientes;
@@ -1581,7 +1600,7 @@ function aplicarAvanzada(){
     if(!_advClienteOk(P,c)) return false;
     const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
-    return enEnt && enCar && (!est||(c.estado||'Pendiente')===est);
+    return enEnt && enCar && (!est||(c.estado||'Pendiente')===est) && _advMoraOk(c,ent,car,md,mh);
   });
   // Se calculan una vez los datos que se muestran (y por los que se puede ordenar)
   window._advFilas=fil.map(function(c){
@@ -3318,11 +3337,13 @@ function exportarResultadoAvanzada(){
   const ent=document.getElementById('adv-ent')?document.getElementById('adv-ent').value:'';
   const car=document.getElementById('adv-car')?document.getElementById('adv-car').value:'';
   const est=document.getElementById('adv-est')?document.getElementById('adv-est').value:'';
+  const md=document.getElementById('adv-md')?document.getElementById('adv-md').value:'';
+  const mh=document.getElementById('adv-mh')?document.getElementById('adv-mh').value:'';
   const universo=window._todosClientesCache||DB.clientes;
   const fil=universo.filter(function(c){
     const enEnt=!ent||(c.creditos||[]).some(function(x){return x.entidad===ent;})||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(function(x){return x.cartera===car;})||c.cartera===car;
-    return enEnt&&enCar&&(!est||(c.estado||'Pendiente')===est);
+    return enEnt&&enCar&&(!est||(c.estado||'Pendiente')===est)&&_advMoraOk(c,ent,car,md,mh);
   });
   exportarExcelClientes(fil,'avanzada_filtro');
 }
