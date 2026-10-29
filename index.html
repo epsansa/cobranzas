@@ -617,7 +617,7 @@ const PLANT_REF = doc(db_fs, "sistema", "plantillas");
 window._plantDoc = null;
 window.plantillasGuardar = async function(obj){
   if(window._ROL!=='admin') throw new Error('Solo el administrador');
-  const d = { pago: obj.pago||{}, plantillas: obj.plantillas||[] };
+  const d = { pago: obj.pago||{}, porEntidad: obj.porEntidad||{}, plantillas: obj.plantillas||[] };
   await setDoc(PLANT_REF, { ...d, ts: serverTimestamp() });
   window._plantDoc = d;
 };
@@ -946,7 +946,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.16.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.17.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1069,7 +1069,7 @@ body.rol-usuario .solo-admin{display:none!important}
   <h3 id="msg-tit">Mensaje al cliente</h3>
   <div class="g2" style="margin-bottom:8px">
     <div class="fld"><label>Plantilla</label><select id="msg-plant" onchange="msgCambio()"></select></div>
-    <div class="fld"><label>Cuota de referencia</label><select id="msg-cuota" onchange="msgCambio()"></select></div>
+    <div class="fld"><label>Cuota de referencia</label><select id="msg-cuota" onchange="msgCuotaCambio()"></select></div>
   </div>
   <div class="fld" style="margin-bottom:8px"><label id="msg-dest-l">Tel&#233;fono</label>
     <input id="msg-dest" list="msg-dest-list" oninput="msgDestInfo()" autocomplete="off">
@@ -1155,7 +1155,7 @@ body.rol-usuario .solo-admin{display:none!important}
     </div>
   </div>
   <div class="btn-row">
-    <button class="btn btn-dark" onclick="guardarTramite()">Guardar tr&#225;mite</button>
+    <button class="btn btn-dark" onclick="guardarTramite()">Guardar tr&#225;mite <span style="opacity:.6;font-size:10px">(Ctrl+G)</span></button>
     <button class="btn btn-outline" onclick="cerrarModal('modalTr')">Cancelar</button>
   </div>
 </div></div>
@@ -1279,7 +1279,7 @@ function renderLista(){
     const txt=(c.nombre+dniNorm+(c.telefonos||[]).join('')+(c.mails||[]).join('')+(c.referencias||[]).join('')+(c.creditos||[]).map(x=>x.num).join('')).toLowerCase();
     const enEnt = !fEnt || (c.creditos||[]).some(x=>x.entidad===fEnt) || c.entidad===fEnt;
     const enCar = !fCar || (c.creditos||[]).some(x=>x.cartera===fCar) || c.cartera===fCar;
-    return (!qNorm||txt.includes(qNorm)) && (!fEst||c.estado===fEst) && enEnt && enCar;
+    return (!qNorm||txt.includes(qNorm)) && (!fEst||(c.estado||'Pendiente')===fEst) && enEnt && enCar;
   });
 
   const el=document.getElementById('clientList');
@@ -1581,7 +1581,7 @@ function aplicarAvanzada(){
     if(!_advClienteOk(P,c)) return false;
     const enEnt=!ent||(c.creditos||[]).some(x=>x.entidad===ent)||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(x=>x.cartera===car)||c.cartera===car;
-    return enEnt && enCar && (!est||c.estado===est);
+    return enEnt && enCar && (!est||(c.estado||'Pendiente')===est);
   });
   // Se calculan una vez los datos que se muestran (y por los que se puede ordenar)
   window._advFilas=fil.map(function(c){
@@ -2030,7 +2030,7 @@ function renderTramites(){
   var trs=(c.tramites||[]).slice().reverse();
   var total=(c.tramites||[]).length;
   var estados=DB.estados||['Pendiente','En acuerdo','Cancelado','Sin contacto'];
-  var estOpts=estados.map(function(e){return '<option value="'+e+'" '+(c.estado===e?'selected':'')+'>'+e+'</option>';}).join('');
+  var estOpts=estados.map(function(e){return '<option value="'+e+'" '+((c.estado||'Pendiente')===e?'selected':'')+'>'+e+'</option>';}).join('');
   var html='<div class="card-hdr" style="margin-bottom:10px">';
   html+='<div style="font-size:15px;font-weight:600">Tr&aacute;mites ('+total+')</div>';
   html+='<div style="display:flex;gap:7px;align-items:center">';
@@ -2116,7 +2116,7 @@ function renderObs(){
     </div>
     <textarea id="obs-txt" style="width:100%;min-height:140px;padding:9px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none;font-family:Arial;resize:vertical">${c.obs||''}</textarea>
     <div class="btn-row">
-      <button class="btn btn-dark" onclick="guardarObs()">Guardar</button>
+      <button class="btn btn-dark" onclick="guardarObs()">Guardar</button><span style="font-size:11px;color:#999;align-self:center">Ctrl+G</span>
     </div>
   </div>`;
 }
@@ -2128,11 +2128,27 @@ function guardarObs(){
   DB.clientes[idx].obsFecha = txt.trim() ? new Date().toISOString().slice(0,10) : null;
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);
-  const btn=event.target;
+  const btn=document.querySelector('#obs-txt').parentNode.querySelector('.btn-row .btn');
+  if(!btn) return;
   btn.textContent='Guardado ✓';
   btn.classList.add('btn-green');
   setTimeout(()=>{btn.textContent='Guardar';btn.classList.remove('btn-green');},2000);
 }
+
+// Ctrl+G guarda el tramite (si esta abierto) o las observaciones (si se estan viendo)
+document.addEventListener('keydown',function(e){
+  if(!(e.ctrlKey||e.metaKey)||e.shiftKey||e.altKey||String(e.key).toLowerCase()!=='g') return;
+  const mt=document.getElementById('modalTr');
+  if(mt && mt.classList.contains('open')){
+    e.preventDefault();
+    const b=mt.querySelector('.btn-row .btn-dark'); if(b) b.click();
+    return;
+  }
+  const ob=document.getElementById('obs-txt');
+  if(ob && ob.offsetParent!==null && typeof guardarObs==='function'){
+    e.preventDefault(); guardarObs();
+  }
+});
 
 // -- TAB DASHBOARD (individual) --
 function renderDashboard(){
@@ -3306,7 +3322,7 @@ function exportarResultadoAvanzada(){
   const fil=universo.filter(function(c){
     const enEnt=!ent||(c.creditos||[]).some(function(x){return x.entidad===ent;})||c.entidad===ent;
     const enCar=!car||(c.creditos||[]).some(function(x){return x.cartera===car;})||c.cartera===car;
-    return enEnt&&enCar&&(!est||c.estado===est);
+    return enEnt&&enCar&&(!est||(c.estado||'Pendiente')===est);
   });
   exportarExcelClientes(fil,'avanzada_filtro');
 }
@@ -3367,7 +3383,7 @@ function filtrarParaExportar(){
   const fmh=document.getElementById('exp-fmh').value;
   const dMD=fmd?parseFechaFlex(fmd):null, dMH=fmh?parseFechaFlex(fmh):null;
   return (window._todosClientesCache||DB.clientes).filter(function(c){
-    if(est&&c.estado!==est) return false;
+    if(est&&(c.estado||'Pendiente')!==est) return false;
     const creds=c.creditos||[];
     if(ent||car||com||fmd||fmh){
       return creds.some(function(cr){
@@ -4404,6 +4420,7 @@ function _plant(){
   var p=window._plantDoc||{};
   return {
     pago:Object.assign({},PLANT_DEFAULT.pago,p.pago||{}),
+    porEntidad:p.porEntidad||{},
     plantillas:(p.plantillas&&p.plantillas.length)?p.plantillas:PLANT_DEFAULT.plantillas
   };
 }
@@ -4422,8 +4439,18 @@ function _cuotasPend(c){
   out.sort(function(a,b){ return String(a.vto)<String(b.vto)?-1:(String(a.vto)>String(b.vto)?1:0); });
   return out;
 }
+// Datos de pago de una entidad: si tiene alias propio usa los suyos; si no, los generales
+function _pagoEnt(ent){
+  var pl=_plant(), g=pl.pago, e=ent?pl.porEntidad[ent]:null;
+  if(e && e.alias) return {empresa:e.empresa||g.empresa,alias:e.alias,cbu:e.cbu||'',titular:e.titular||'',banco:e.banco||'',wsp:e.wsp||g.wsp};
+  return g;
+}
+function _entDeCuota(c,ref){
+  var cr=(ref&&ref.cr)||(c.creditos||[])[0]||{};
+  return cr.entidad||c.entidad||'';
+}
 function _msgVars(c,ref){
-  var P=_plant().pago, pend=_cuotasPend(c), hoy=new Date().toISOString().slice(0,10);
+  var P=_pagoEnt(_entDeCuota(c,ref||_cuotasPend(c)[0])), pend=_cuotasPend(c), hoy=new Date().toISOString().slice(0,10);
   var venc=pend.filter(function(x){ return x.vto && x.vto<hoy; });
   var saldo=pend.length?pend.reduce(function(s,x){ return s+x.monto; },0):(c.creditos||[]).reduce(function(s,x){ return s+(parseFloat(x.capital)||0); },0);
   var cu=ref||pend[0]||null;
@@ -4456,15 +4483,27 @@ function abrirMensaje(){
   var c=clienteActivo; if(!c){ alert('Abrí un cliente primero.'); return; }
   _msgCli=c; _msgRegistrado=false;
   document.getElementById('msg-tit').textContent='Mensaje a '+_tituloNombre(c.nombre);
-  var pl=_plant().plantillas;
-  document.getElementById('msg-plant').innerHTML=pl.map(function(p,i){ return '<option value="'+i+'">'+_escU((p.canal==='mail'?'✉ ':'💬 ')+p.nombre)+'</option>'; }).join('');
   var pend=_cuotasPend(c);
+  _msgLlenarPlant('');
   document.getElementById('msg-cuota').innerHTML='<option value="">Automática (próxima pendiente)</option>'+pend.map(function(x,k){
     return '<option value="'+k+'">'+_escU(x.label+' · '+(x.vto?fmtDMA(x.vto):'s/f')+' · '+_fm(x.monto)+' · '+(x.cr.producto||'Crédito'))+'</option>';
   }).join('');
   document.getElementById('msg-reg').checked=true;
   msgCambio();
   document.getElementById('modalMsg').classList.add('open');
+}
+// Plantillas de la entidad del cliente primero, luego las generales. Se guarda el indice real dentro de la lista completa.
+function _msgLlenarPlant(keepId){
+  var todas=_plant().plantillas, ent=_entDeCuota(_msgCli,_msgCuotaSel()||_cuotasPend(_msgCli)[0]);
+  var idx=todas.map(function(p,i){ return i; }).filter(function(i){ return !todas[i].entidad || todas[i].entidad===ent; });
+  idx.sort(function(a,b){ return (todas[a].entidad===ent?0:1)-(todas[b].entidad===ent?0:1); });
+  var sel=document.getElementById('msg-plant');
+  sel.innerHTML=idx.map(function(i){ var p=todas[i]; return '<option value="'+i+'">'+_escU((p.canal==='mail'?'✉ ':'💬 ')+p.nombre+(p.entidad?' ['+p.entidad+']':''))+'</option>'; }).join('');
+  if(keepId){ for(var k=0;k<idx.length;k++){ if(todas[idx[k]].id===keepId){ sel.value=String(idx[k]); break; } } }
+}
+function msgCuotaCambio(){
+  var pl=_plant().plantillas[parseInt(document.getElementById('msg-plant').value,10)];
+  _msgLlenarPlant(pl&&pl.id); msgCambio();
 }
 function _msgCuotaSel(){
   var v=document.getElementById('msg-cuota').value; if(v==='') return null;
@@ -4524,20 +4563,22 @@ var _tplEdit=null;
 function renderPlantillasAdmin(){
   var el=document.getElementById('herrContent'); if(!el) return;
   var cur=_plant();
-  _tplEdit={pago:Object.assign({},cur.pago),plantillas:JSON.parse(JSON.stringify(cur.plantillas)),sel:0};
+  _tplEdit={pago:Object.assign({},cur.pago),porEntidad:JSON.parse(JSON.stringify(cur.porEntidad||{})),plantillas:JSON.parse(JSON.stringify(cur.plantillas)),sel:0};
   var P=_tplEdit.pago;
   function campo(id,lbl,val,ph){ return '<div class="fld"><label>'+lbl+'</label><input id="tpl-'+id+'" value="'+_escU(val||'')+'" placeholder="'+_escU(ph||'')+'"></div>'; }
   el.innerHTML=
   '<div class="card"><div class="card-title" style="margin-bottom:6px">Datos de pago</div>'+
-    '<div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Se usan en los mensajes y en la imagen de pago de cada cuota.</div>'+
+    '<div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Se usan en los mensajes y en la imagen de pago de cada cuota. Elegí una entidad para cargarle una cuenta propia; las entidades sin cuenta propia usan los datos generales.</div>'+
+    '<div class="fld" style="max-width:360px;margin-bottom:10px"><label>Cuenta de</label><select id="tpl-pent" onchange="tplPagoEnt()"><option value="">General (todas las entidades)</option>'+(DB.entidades||[]).map(function(e){ return '<option value="'+_escU(e)+'">'+_escU(e)+(_tplEdit.porEntidad[e]&&_tplEdit.porEntidad[e].alias?' ✓':'')+'</option>'; }).join('')+'</select></div>'+
     '<div class="g2" style="max-width:760px">'+campo('empresa','Nombre de la empresa',P.empresa,'EPSAN')+campo('alias','Alias para transferir',P.alias,'epsan.cobranzas')+
       campo('cbu','CBU / CVU (opcional)',P.cbu)+campo('titular','Titular de la cuenta',P.titular)+campo('banco','Banco / billetera (opcional)',P.banco)+campo('wsp','WhatsApp de la empresa (para comprobantes)',P.wsp,'11 5555 1234')+'</div>'+
-    '<div class="btn-row"><button class="btn btn-dark" onclick="tplGuardarPago()">Guardar datos de pago</button></div></div>'+
+    '<div class="btn-row"><button class="btn btn-dark" onclick="tplGuardarPago()">Guardar datos de pago</button><button class="btn btn-outline" id="tpl-pquitar" style="display:none" onclick="tplQuitarPagoEnt()">Quitar cuenta propia</button></div></div>'+
   '<div class="card"><div class="card-title" style="margin-bottom:6px">Plantillas de mensajes</div>'+
     '<div style="font-size:12px;color:#666;margin-bottom:8px;line-height:1.5">Elegí una para editarla. Las variables entre llaves se reemplazan con los datos de cada cliente. Si una variable no tiene valor, esa línea no aparece.</div>'+
     '<div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-bottom:10px"><div class="fld" style="min-width:260px"><label>Plantilla</label><select id="tpl-sel" onchange="tplSel()"></select></div>'+
       '<button class="btn btn-outline btn-sm" onclick="tplNueva()">+ Nueva</button><button class="btn btn-red btn-sm" onclick="tplEliminar()">Eliminar</button><button class="btn btn-outline btn-sm" onclick="tplRestaurar()">Restaurar originales</button></div>'+
     '<div class="g2" style="max-width:760px;margin-bottom:8px"><div class="fld"><label>Nombre</label><input id="tpl-nombre"></div>'+
+      '<div class="fld"><label>Entidad</label><select id="tpl-ent"><option value="">Todas las entidades</option>'+(DB.entidades||[]).map(function(e){ return '<option value="'+_escU(e)+'">'+_escU(e)+'</option>'; }).join('')+'</select></div>'+
       '<div class="fld"><label>Canal</label><select id="tpl-canal" onchange="tplCanal()"><option value="wsp">WhatsApp</option><option value="mail">Mail</option></select></div></div>'+
     '<div class="fld" id="tpl-asunto-w" style="max-width:760px;margin-bottom:8px;display:none"><label>Asunto</label><input id="tpl-asunto"></div>'+
     '<div class="fld" style="max-width:760px"><label>Texto</label><textarea id="tpl-texto" style="width:100%;box-sizing:border-box;height:200px;padding:9px;border:1px solid #ddd;border-radius:8px;font:13px Arial;resize:vertical;outline:none"></textarea></div>'+
@@ -4547,11 +4588,11 @@ function renderPlantillasAdmin(){
 }
 function tplLlenarSel(){
   var s=document.getElementById('tpl-sel'); if(!s) return;
-  s.innerHTML=_tplEdit.plantillas.map(function(p,i){ return '<option value="'+i+'"'+(i===_tplEdit.sel?' selected':'')+'>'+_escU((p.canal==='mail'?'✉ ':'💬 ')+p.nombre)+'</option>'; }).join('');
+  s.innerHTML=_tplEdit.plantillas.map(function(p,i){ return '<option value="'+i+'"'+(i===_tplEdit.sel?' selected':'')+'>'+_escU((p.canal==='mail'?'✉ ':'💬 ')+p.nombre+(p.entidad?' ['+p.entidad+']':''))+'</option>'; }).join('');
 }
 function tplMostrar(){
   var p=_tplEdit.plantillas[_tplEdit.sel]; if(!p){ return; }
-  document.getElementById('tpl-nombre').value=p.nombre||''; document.getElementById('tpl-canal').value=p.canal||'wsp';
+  document.getElementById('tpl-nombre').value=p.nombre||''; document.getElementById('tpl-ent').value=p.entidad||''; document.getElementById('tpl-canal').value=p.canal||'wsp';
   document.getElementById('tpl-asunto').value=p.asunto||''; document.getElementById('tpl-texto').value=p.texto||'';
   tplCanal();
 }
@@ -4562,16 +4603,37 @@ function tplInsertar(v){
   t.value=t.value.slice(0,a)+v+t.value.slice(b); t.focus(); t.selectionStart=t.selectionEnd=a+v.length;
 }
 function _tplPersistir(msg){
-  return window.plantillasGuardar({pago:_tplEdit.pago,plantillas:_tplEdit.plantillas}).then(function(){ _toast(msg); }).catch(function(e){ alert('No se pudo guardar: '+(e.message||e)); });
+  return window.plantillasGuardar({pago:_tplEdit.pago,porEntidad:_tplEdit.porEntidad,plantillas:_tplEdit.plantillas}).then(function(){ _toast(msg); }).catch(function(e){ alert('No se pudo guardar: '+(e.message||e)); });
+}
+var _TPL_CAMPOS=['empresa','alias','cbu','titular','banco','wsp'];
+function tplPagoEnt(){
+  var ent=document.getElementById('tpl-pent').value, src=ent?(_tplEdit.porEntidad[ent]||{}):_tplEdit.pago;
+  _TPL_CAMPOS.forEach(function(k){ document.getElementById('tpl-'+k).value=src[k]||''; });
+  document.getElementById('tpl-pquitar').style.display=(ent&&_tplEdit.porEntidad[ent])?'inline-block':'none';
 }
 function tplGuardarPago(){
-  ['empresa','alias','cbu','titular','banco','wsp'].forEach(function(k){ _tplEdit.pago[k]=document.getElementById('tpl-'+k).value.trim(); });
-  _tplPersistir('Datos de pago guardados');
+  var ent=document.getElementById('tpl-pent').value, o={};
+  _TPL_CAMPOS.forEach(function(k){ o[k]=document.getElementById('tpl-'+k).value.trim(); });
+  if(!ent) _tplEdit.pago=o;
+  else if(o.alias) _tplEdit.porEntidad[ent]=o;
+  else { delete _tplEdit.porEntidad[ent]; }
+  _tplPersistir(ent?(o.alias?'Cuenta de '+ent+' guardada':'Sin alias: '+ent+' usa los datos generales'):'Datos de pago generales guardados');
+  tplPagoEntRefrescar();
+}
+function tplPagoEntRefrescar(){
+  var s=document.getElementById('tpl-pent'), v=s.value;
+  Array.prototype.forEach.call(s.options,function(op){ if(!op.value) return; var t=op.value; op.textContent=t+((_tplEdit.porEntidad[t]&&_tplEdit.porEntidad[t].alias)?' ✓':''); });
+  s.value=v; tplPagoEnt();
+}
+function tplQuitarPagoEnt(){
+  var ent=document.getElementById('tpl-pent').value; if(!ent) return;
+  if(!confirm('¿Quitar la cuenta propia de '+ent+'? Pasará a usar los datos generales.')) return;
+  delete _tplEdit.porEntidad[ent]; _tplPersistir('Cuenta de '+ent+' eliminada'); tplPagoEntRefrescar();
 }
 function tplGuardar(){
   var p=_tplEdit.plantillas[_tplEdit.sel]; if(!p) return;
   var nombre=document.getElementById('tpl-nombre').value.trim(); if(!nombre){ alert('Poné un nombre a la plantilla.'); return; }
-  p.nombre=nombre; p.canal=document.getElementById('tpl-canal').value; p.asunto=document.getElementById('tpl-asunto').value; p.texto=document.getElementById('tpl-texto').value;
+  p.nombre=nombre; p.entidad=document.getElementById('tpl-ent').value; p.canal=document.getElementById('tpl-canal').value; p.asunto=document.getElementById('tpl-asunto').value; p.texto=document.getElementById('tpl-texto').value;
   tplLlenarSel(); _tplPersistir('Plantilla guardada');
 }
 function tplNueva(){
@@ -4635,7 +4697,7 @@ var _pagoDibujar=(function(){
 })();
 var _piCanvas=null, _piD=null, _piCuota=null, _piRegistrado=false;
 function abrirPagoCuota(i,pi){
-  var c=clienteActivo, P=_plant().pago;
+  var c=clienteActivo, P=_pagoEnt(c.creditos[i].entidad||c.entidad||'');
   if(!P.alias){ alert(window.esAdmin()?'Primero cargá el alias y los datos de pago en Herramientas > Plantillas y pago.':'El administrador todavía no cargó los datos de pago.'); return; }
   var cr=c.creditos[i], p=cr.plan[pi], n=0; cr.plan.forEach(function(x,k){ if(!x.esAnticipo && k<=pi) n++; });
   var label=p.esAnticipo?'Anticipo':'Cuota C'+n;
@@ -4959,7 +5021,7 @@ function renderBackupTab(){
  'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
  'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
  'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs',
- 'tplGuardarPago','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
+ 'tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
 ].forEach(function(n){
   var f=window[n];
   if(typeof f!=='function') return;
