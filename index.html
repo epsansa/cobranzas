@@ -946,7 +946,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.19.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.19.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -4437,12 +4437,21 @@ var PLANT_DEFAULT={
   ]
 };
 var PLANT_VARS=['nombre','nombre_cargado','dni','entidad','cartera','producto','nro_credito','saldo_total','cuotas_vencidas','cuota_nro','cuota_monto','cuota_vto','alias','cbu','titular_cuenta','banco','wsp_empresa','empresa','usuario','hoy'];
+// La plantilla "Datos para transferir" original (sin cambios del administrador) se actualiza sola al texto nuevo
+var _P4_VIEJO='Hola {nombre}, te paso los datos para abonar:\n\n*Importe:* {cuota_monto}\n*Alias:* {alias}\n*CBU/CVU:* {cbu}\n*Titular:* {titular_cuenta}\n*Banco/billetera:* {banco}\n\nEn el concepto de la transferencia pon\u00e9 tu DNI y envi\u00e1 el comprobante por este chat para registrar tu pago.\n\n{empresa}';
+function _plantMigrar(p){
+  if(p && p.id==='p4' && String(p.texto||'').replace(/\r/g,'').trim()===_P4_VIEJO){
+    var nuevo=PLANT_DEFAULT.plantillas.filter(function(x){ return x.id==='p4'; })[0];
+    return Object.assign({},p,{texto:nuevo.texto});
+  }
+  return p;
+}
 function _plant(){
   var p=window._plantDoc||{};
   return {
     pago:Object.assign({},PLANT_DEFAULT.pago,p.pago||{}),
     porEntidad:p.porEntidad||{},
-    plantillas:(p.plantillas&&p.plantillas.length)?p.plantillas:PLANT_DEFAULT.plantillas
+    plantillas:(p.plantillas&&p.plantillas.length)?p.plantillas.map(_plantMigrar):PLANT_DEFAULT.plantillas
   };
 }
 // Cuotas impagas de todos los creditos del cliente, ordenadas por vencimiento
