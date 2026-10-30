@@ -67,6 +67,7 @@ window.loginEpsan = async function(){
 
 window.logoutEpsan = async function(){
   if(!confirm('¿Cerrar sesión?')) return;
+  try{ await window.presenciaDetener(true); }catch(e){}
   try{ await _IDB.limpiar(); }catch(e){}
   await signOut(auth);
   location.reload(); // estado limpio: no queda nada del usuario anterior en pantalla
@@ -647,6 +648,34 @@ window.backupRegistrar = async function(o){
 };
 
 
+// -- PRESENCIA (quien esta conectado): cada PC avisa cada 2 min en su propio documento sistema/pres_<mail> --
+function _presDocId(e){ return 'pres_'+String(e||'').toLowerCase().replace(/[^a-z0-9]/g,'_'); }
+window._pres = {};
+window.presenciaIniciar = function(email){
+  window.presenciaDetener(false);
+  const mail = String(email||'').toLowerCase();
+  const ref = doc(db_fs,'sistema',_presDocId(mail));
+  const latir = function(ts){ try{ setDoc(ref,{pres:true,email:mail,ts:(ts===undefined?Date.now():ts)}).catch(function(){}); }catch(e){} };
+  window._presRef = ref; window._presLatir = latir;
+  latir();
+  window._presTimer = setInterval(function(){ latir(); }, 120000);
+  window._presVis = function(){ if(!document.hidden) latir(); };
+  document.addEventListener('visibilitychange', window._presVis);
+  window._presUnsub = onSnapshot(query(collection(db_fs,'sistema'), where('pres','==',true)), function(sn){
+    const o = {};
+    sn.forEach(function(d){ const v=d.data(); if(v && v.email) o[v.email] = v.ts||0; });
+    window._pres = o;
+    if(typeof window.presPintar==='function') window.presPintar();
+  }, function(){});
+};
+window.presenciaDetener = async function(avisar){
+  if(window._presTimer){ clearInterval(window._presTimer); window._presTimer=null; }
+  if(window._presVis){ document.removeEventListener('visibilitychange', window._presVis); window._presVis=null; }
+  if(window._presUnsub){ try{window._presUnsub();}catch(e){} window._presUnsub=null; }
+  if(avisar && window._presLatir){ try{ await Promise.race([setDoc(window._presRef,{pres:true,email:String(window._fbUserEmail||'').toLowerCase(),ts:0}), new Promise(function(r){setTimeout(r,1500);})]); }catch(e){} }
+  window._pres = {};
+};
+
 // -- AUTH STATE --
 onAuthStateChanged(auth, async function(user){
   if(user){
@@ -666,6 +695,7 @@ onAuthStateChanged(auth, async function(user){
     window._fbUserEmail=user.email||'';
     mostrarApp();
     window.chatIniciar(user.email);
+    window.presenciaIniciar(user.email);
     if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} }
     window._unsubPlant = onSnapshot(PLANT_REF, function(sn){ window._plantDoc = sn.exists()?sn.data():null; }, function(){});
     if(rol==='admin'){ setTimeout(function(){ if(typeof window.backupAutoIniciar==='function') window.backupAutoIniciar(); },15000); }
@@ -693,6 +723,7 @@ onAuthStateChanged(auth, async function(user){
     if(window._unsubConfig){ window._unsubConfig(); window._unsubConfig=null; }
     if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} window._unsubUsr=null; }
     if(window.chatDetener) window.chatDetener();
+    if(window.presenciaDetener) window.presenciaDetener(false);
     if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} window._unsubPlant=null; }
     window._plantDoc=null;
     window._ROL='usuario';
@@ -948,7 +979,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.20.1</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.21.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -3975,7 +4006,7 @@ async function renderUsuarios(){
   const lista=d.usuarios||[];
   const total=1+lista.length, max=window.usrMax||5;
   const filas=lista.map(function(u){
-    return '<tr><td>'+_escU(u.nombre||'—')+' <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU(u.email)+'" data-n="'+_escU(u.nombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(u.email)+'</td><td><span class="badge bp">Agregar y consultar</span><div style="font-size:11px;color:#666;margin-top:4px">Avanzadas: '+_alcResumen(u)+' <button class="btn btn-outline btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosAlcance(this.dataset.m)">🔒 Alcance</button></div></td>'+
+    return '<tr><td>'+_escU(u.nombre||'—')+' <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU(u.email)+'" data-n="'+_escU(u.nombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(u.email)+'</td><td><span class="pres-dot" data-e="'+_escU(String(u.email).toLowerCase())+'"></span></td><td><span class="badge bp">Agregar y consultar</span><div style="font-size:11px;color:#666;margin-top:4px">Avanzadas: '+_alcResumen(u)+' <button class="btn btn-outline btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosAlcance(this.dataset.m)">🔒 Alcance</button></div></td>'+
       '<td style="white-space:nowrap"><button class="btn btn-outline btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosReset(this.dataset.m)">Enviar cambio de clave</button> '+
       '<button class="btn btn-red btn-sm" data-m="'+_escU(u.email)+'" onclick="usuariosQuitar(this.dataset.m)">Quitar</button></td></tr>';
   }).join('');
@@ -3991,8 +4022,8 @@ async function renderUsuarios(){
   el.innerHTML=
   '<div class="card">'+
     '<div class="card-hdr"><div class="card-title">Usuarios del sistema ('+total+' de '+max+')</div></div>'+
-    '<table class="tbl"><thead><tr><th>Nombre</th><th>Usuario (mail)</th><th>Permisos</th><th></th></tr></thead><tbody>'+
-      '<tr><td><strong>'+_escU(d.adminNombre||'Administrador')+'</strong> <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU((d.adminEmail||'').toLowerCase())+'" data-n="'+_escU(d.adminNombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(d.adminEmail)+'</td><td><span class="badge ba">Todos los permisos</span></td><td></td></tr>'+
+    '<table class="tbl"><thead><tr><th>Nombre</th><th>Usuario (mail)</th><th>Conexión</th><th>Permisos</th><th></th></tr></thead><tbody>'+
+      '<tr><td><strong>'+_escU(d.adminNombre||'Administrador')+'</strong> <button class="btn btn-outline btn-sm" title="Cambiar nombre" data-m="'+_escU((d.adminEmail||'').toLowerCase())+'" data-n="'+_escU(d.adminNombre||'')+'" onclick="usuariosRenombrar(this.dataset.m,this.dataset.n)">✏️</button></td><td>'+_escU(d.adminEmail)+'</td><td><span class="pres-dot" data-e="'+_escU(String(d.adminEmail||'').toLowerCase())+'"></span></td><td><span class="badge ba">Todos los permisos</span></td><td></td></tr>'+
       filas+
     '</tbody></table>'+form+
     '<div style="margin-top:16px;font-size:12px;color:#666;line-height:1.5"><strong>Los usuarios pueden:</strong> consultar clientes, cuentas, tr\u00e1mites, b\u00fasquedas, comercios y subdiario; agregar tr\u00e1mites (y con ellos cambiar el estado del cliente), editar observaciones, agregar tel\u00e9fonos, mails y datos de referencia, armar mensajes y datos de pago, y adjuntar o descargar comprobantes.<br>'+
@@ -4003,6 +4034,7 @@ async function renderUsuarios(){
     '<textarea id="usr-reglas" readonly style="width:100%;height:230px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #ddd;border-radius:8px">'+_escU(REGLAS_FIRESTORE)+'</textarea>'+
     '<div class="btn-row"><button class="btn btn-outline btn-sm" onclick="usuariosCopiarReglas()">Copiar reglas</button></div>'+
   '</div>';
+  presPintar();
 }
 async function usuariosCrear(){
   const n=document.getElementById('usr-nombre').value, m=document.getElementById('usr-mail').value, p=document.getElementById('usr-pass').value;
@@ -4146,7 +4178,7 @@ function chatRender(){
   if(!convs.some(function(c){return c.id===_chatConvAct;})) _chatConvAct='general';
   var chips=document.getElementById('chat-chips');
   if(chips) chips.innerHTML=convs.map(function(c){
-    return '<button class="chat-chip'+(c.id===_chatConvAct?' active':'')+'" data-c="'+_chatEsc(c.id)+'" onclick="chatSel(this.dataset.c)">'+_chatEsc(c.nombre)+(c.nl&&c.id!==_chatConvAct?'<span class="nb">'+c.nl+'</span>':'')+'</button>';
+    return '<button class="chat-chip'+(c.id===_chatConvAct?' active':'')+'" data-c="'+_chatEsc(c.id)+'" onclick="chatSel(this.dataset.c)">'+(c.email?'<span title="'+_chatEsc(_presEstado(c.email).txt)+'" style="color:'+(_presEstado(c.email).on?'#1a9a4a':'#bbb')+';font-size:10px;margin-right:4px">&#9679;</span>':'')+_chatEsc(c.nombre)+(c.nl&&c.id!==_chatConvAct?'<span class="nb">'+c.nl+'</span>':'')+'</button>';
   }).join('');
   var el=document.getElementById('chat-msgs'); if(!el) return;
   var cerca=(el.scrollHeight-el.scrollTop-el.clientHeight)<80;
@@ -5050,6 +5082,28 @@ function copiarDato(b){
   _copiarTexto(t,'Copiado: '+t);
   var o=b.innerHTML; b.innerHTML='&#10003;'; setTimeout(function(){ b.innerHTML=o; },1200);
 }
+
+// ----- Quien esta en linea -----
+function _presEstado(email){
+  var e=String(email||'').toLowerCase();
+  if(e===String(window._fbUserEmail||'').toLowerCase()) return {on:true,txt:'En línea (vos)'};
+  var ts=(window._pres||{})[e];
+  if(!ts) return {on:false,txt:'Sin conexión reciente'};
+  var min=Math.floor((Date.now()-ts)/60000);
+  if(min<5) return {on:true,txt:'En línea'};
+  var d=new Date(ts), hm=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  var hoy=new Date().toDateString()===d.toDateString();
+  return {on:false,txt:'Visto '+(hoy?'hoy '+hm:fmtDMA(d)+' '+hm)};
+}
+function presPintar(){
+  Array.prototype.forEach.call(document.querySelectorAll('.pres-dot'),function(el){
+    var s=_presEstado(el.getAttribute('data-e'));
+    el.innerHTML=s.on?'<span style="color:#1a9a4a">&#9679; '+s.txt+'</span>':'<span style="color:#999">&#9675; '+s.txt+'</span>';
+  });
+  if(typeof _chatAbierto!=='undefined' && _chatAbierto && typeof chatRender==='function') chatRender();
+}
+window.presPintar=presPintar;
+setInterval(presPintar,60000);
 
 // ===================================================
 // PERMISOS: funciones exclusivas del administrador
