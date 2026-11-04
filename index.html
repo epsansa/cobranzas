@@ -583,11 +583,12 @@ window.chatIniciar = function(email){
     onSnapshot(query(MSG_COL, where('dueno','==',me)), function(s){ window._chatErr=''; gotD=true; mapD={}; s.forEach(function(d){ mapD[d.id]=d.data(); }); rebuild(); }, err)
   ];
 };
-window.chatEnviar = async function(conv, texto, cli){
+window.chatEnviar = async function(conv, texto, cli, resp){
   const me = String(window._fbUserEmail||'').toLowerCase();
   const base = 'm_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
   const m = { de: me, conv: conv, texto: String(texto).slice(0,2000), t: Date.now(), creado: serverTimestamp() };
   if(cli){ m.clienteId = String(cli.id); m.clienteNombre = String(cli.nombre||''); }
+  if(resp && resp.id){ m.resp = { id: String(resp.id), de: String(resp.de||''), texto: String(resp.texto||'').slice(0,120) }; }
   if(conv === 'general'){
     await setDoc(doc(db_fs,"mensajes",base), Object.assign({}, m, { dueno: 'general' }));
     return;
@@ -600,6 +601,17 @@ window.chatEnviar = async function(conv, texto, cli){
   await b.commit();
 };
 
+// Reaccion con emoji a un mensaje puntual: una por persona (volver a tocar el mismo emoji la quita)
+window.chatReaccion = async function(id, valor){
+  const me = String(window._fbUserEmail||'').toLowerCase();
+  const key = me.replace(/[^a-z0-9]/g,'_');
+  const esDM = /_[01]$/.test(String(id));
+  const base = String(id).replace(/_[01]$/,'');
+  const ids = esDM ? [base+'_0', base+'_1'] : [String(id)];
+  const b = writeBatch(db_fs);
+  ids.forEach(function(i){ b.update(doc(db_fs,"mensajes",i), { ['reac.'+key]: valor }); });
+  await b.commit();
+};
 window.chatMarcarLeidos = async function(ids){
   // marca como leidos los privados recibidos (en la copia de quien los envio y en la propia)
   if(!ids || !ids.length) return;
@@ -869,6 +881,27 @@ body.rol-usuario .solo-admin{display:none!important}
 .cm-r{font-size:10px;color:#9aa5b8;text-align:right;margin-top:3px}
 .cm-r.ok{color:#1d6fe8;font-weight:600}
 .cm-c{display:inline-block;margin-top:4px;font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid #2557a7;color:#2557a7;background:#fff;cursor:pointer}
+.cm{position:relative}
+.cm-a{position:absolute;top:-11px;right:6px;display:flex;gap:2px;opacity:0;transition:opacity .12s}
+.cm:hover .cm-a,.cm-a:focus-within{opacity:1}
+@media (hover:none){.cm-a{opacity:.85}}
+.cm-a button{border:1px solid #cfd8e8;background:#fff;border-radius:10px;font-size:12px;line-height:1;padding:3px 6px;cursor:pointer;color:#47556b}
+.cm-q{border-left:3px solid #2557a7;background:rgba(37,87,167,.08);border-radius:5px;padding:3px 7px;margin-bottom:4px;font-size:11px;cursor:pointer;color:#47556b}
+.cm-q b{display:block;color:#2557a7;font-size:10px}
+.cm-q span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cm-e{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.cm-e button{border:1px solid #cfd8e8;background:#fff;border-radius:11px;font-size:12px;padding:0 6px;cursor:pointer;line-height:1.6}
+.cm-e button.yo{background:#dbe8ff;border-color:#2557a7}
+.cm.flash{animation:cmflash 1.2s}
+@keyframes cmflash{0%,60%{box-shadow:0 0 0 3px #f5c542}100%{box-shadow:none}}
+#chat-pop{display:none;position:absolute;z-index:5;background:#fff;border:1px solid #cfd8e8;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.2);padding:5px;flex-wrap:wrap;gap:2px;max-width:300px}
+#chat-pop button{border:0;background:transparent;font-size:20px;padding:3px 5px;cursor:pointer;border-radius:7px;line-height:1}
+#chat-pop button:hover{background:#eef3fa}
+#chat-resp{display:none;align-items:center;gap:6px;border-left:3px solid #2557a7;background:#eef3fa;border-radius:5px;padding:3px 7px;font-size:11px;color:#47556b}
+#chat-resp div{flex:1;min-width:0}
+#chat-resp b{display:block;color:#2557a7;font-size:10px}
+#chat-resp span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#chat-resp button{border:0;background:transparent;cursor:pointer;font-size:14px;color:#7a869a}
 .chat-vacio{color:#9aa5b8;font-size:12px;text-align:center;margin:auto}
 .chat-foot{border-top:1px solid #e1e6ef;padding:8px;display:flex;flex-direction:column;gap:5px}
 .chat-foot textarea{width:100%;box-sizing:border-box;resize:none;height:54px;padding:7px;border:1px solid #cfd8e8;border-radius:8px;font:13px Arial;outline:none}
@@ -979,7 +1012,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.21.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.22.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1001,12 +1034,15 @@ body.rol-usuario .solo-admin{display:none!important}
   <div class="chat-msgs" id="chat-msgs"></div>
   <div class="chat-foot">
     <div id="chat-adj-info" style="font-size:11px;color:#2557a7;display:none"></div>
+    <div id="chat-resp"><div><b id="chat-resp-q"></b><span id="chat-resp-t"></span></div><button onclick="chatCancelarResp()" title="Cancelar respuesta">&#10005;</button></div>
     <textarea id="chat-txt" placeholder="Escribí un mensaje… (Enter envía, Shift+Enter nueva línea)" maxlength="2000" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();chatEnviarUI();}"></textarea>
     <div class="row">
+      <button class="btn btn-outline btn-sm" id="chat-emo-btn" onclick="chatPopComponer(this)" title="Emojis">&#128512;</button>
       <button class="btn btn-outline btn-sm" id="chat-adj-btn" onclick="chatAdjuntar()" title="Adjuntar el cliente que tenés abierto">&#128206; Cliente</button>
       <button class="btn btn-dark btn-sm" id="chat-send" style="margin-left:auto" onclick="chatEnviarUI()">Enviar</button>
     </div>
   </div>
+  <div id="chat-pop"></div>
   <div class="chat-nota">Los mensajes se borran solos a los 7 d&#237;as.</div>
 </div>
 <div class="body">
@@ -3984,7 +4020,7 @@ const REGLAS_FIRESTORE = [
 "    match /mensajes/{id} {",
 "      allow read: if habilitado() && (resource.data.dueno == 'general' || resource.data.dueno == request.auth.token.email.lower());",
 "      allow create: if habilitado() && request.resource.data.de == request.auth.token.email.lower();",
-"      allow update: if habilitado() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leido']);",
+"      allow update: if habilitado() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['leido','reac']);",
 "      allow delete: if habilitado() && resource.data.creado < request.time - duration.value(7, 'd');",
 "    }",
 "    match /clientes/{id} {",
@@ -4165,6 +4201,69 @@ function _chatMarcarLeidosVisibles(ms){
   ids.forEach(function(id){ _chatMarcando[id]=1; });
   window.chatMarcarLeidos(ids).catch(function(e){ ids.forEach(function(id){ delete _chatMarcando[id]; }); console.warn('chat: no se pudo marcar leido', e.code||e.message); });
 }
+var _chatEmojis=['😀','😂','🙂','😉','😊','😍','🤔','😮','😢','😅','🙌','👏','👍','👎','🙏','💪','👀','🔥','✅','❌','⚠️','❤️','🎉','📞','💬','📎','⏰','💰','📄','🚀','🤝','👋'];
+var _chatReacRapidas=['👍','❤️','😂','😮','🙏','✅'];
+var _chatPopModo=null, _chatPopId=null, _chatResp=null;
+function _chatNombreKey(k){
+  var me=_chatMe(); if(String(me).replace(/[^a-z0-9]/g,'_')===k) return 'Vos';
+  var d=window._usrDoc||{}, emails=[String(d.adminEmail||'').toLowerCase()].concat((d.emails||[]).map(function(x){return String(x).toLowerCase();}));
+  for(var i=0;i<emails.length;i++){ if(emails[i] && emails[i].replace(/[^a-z0-9]/g,'_')===k) return window.nombreUsuario(emails[i]); }
+  return k;
+}
+function _chatReacHtml(m){
+  var r=m.reac; if(!r) return '';
+  var grupos={}, yo=_chatMe().replace(/[^a-z0-9]/g,'_'), orden=[];
+  Object.keys(r).forEach(function(k){ var e=r[k]; if(!e) return; if(!grupos[e]){ grupos[e]={n:0,nom:[],yo:false}; orden.push(e); } grupos[e].n++; grupos[e].nom.push(_chatNombreKey(k)); if(k===yo) grupos[e].yo=true; });
+  if(!orden.length) return '';
+  return '<div class="cm-e">'+orden.map(function(e){ var g=grupos[e]; return '<button class="'+(g.yo?'yo':'')+'" title="'+_chatEsc(g.nom.join(', '))+'" data-e="'+_chatEsc(e)+'" onclick="chatReacToggle(this)">'+e+(g.n>1?' '+g.n:'')+'</button>'; }).join('')+'</div>';
+}
+function _chatPopMostrar(btn,emojis,modo,id){
+  var pop=document.getElementById('chat-pop'), panel=document.getElementById('chat-panel');
+  if(pop.style.display==='flex' && _chatPopModo===modo && _chatPopId===id){ chatPopCerrar(); return; }
+  _chatPopModo=modo; _chatPopId=id;
+  pop.innerHTML=emojis.map(function(e){ return '<button data-e="'+e+'" onclick="chatPopElegir(this.dataset.e)">'+e+'</button>'; }).join('');
+  pop.style.display='flex';
+  var rb=btn.getBoundingClientRect(), rp=panel.getBoundingClientRect();
+  var left=Math.max(4,Math.min(rb.left-rp.left-60, rp.width-pop.offsetWidth-4));
+  var top=rb.top-rp.top-pop.offsetHeight-6; if(top<4) top=rb.bottom-rp.top+6;
+  pop.style.left=left+'px'; pop.style.top=top+'px';
+}
+function chatPopCerrar(){ var p=document.getElementById('chat-pop'); if(p) p.style.display='none'; _chatPopModo=null; _chatPopId=null; }
+function chatPopReac(btn){ _chatPopMostrar(btn,_chatReacRapidas,'reac',btn.closest('.cm').getAttribute('data-id')); }
+function chatPopComponer(btn){ _chatPopMostrar(btn,_chatEmojis,'comp','comp'); }
+function chatPopElegir(e){
+  var modo=_chatPopModo, id=_chatPopId; chatPopCerrar();
+  if(modo==='reac') chatReaccionar(id,e);
+  else if(modo==='comp'){
+    var t=document.getElementById('chat-txt'), a=t.selectionStart==null?t.value.length:t.selectionStart, b=t.selectionEnd==null?a:t.selectionEnd;
+    t.value=t.value.slice(0,a)+e+t.value.slice(b); t.focus(); t.selectionStart=t.selectionEnd=a+e.length;
+  }
+}
+function chatReacToggle(btn){ chatReaccionar(btn.closest('.cm').getAttribute('data-id'),btn.getAttribute('data-e')); }
+async function chatReaccionar(id,e){
+  var m=(window._chatMsgs||{})[id]||{}, yo=_chatMe().replace(/[^a-z0-9]/g,'_');
+  var nuevo=(m.reac&&m.reac[yo]===e)?'':e;
+  try{ await window.chatReaccion(id,nuevo); }
+  catch(err){ alert('No se pudo reaccionar.'+((err&&err.code==='permission-denied')?'\n\nFalta actualizar las reglas de Firestore (Herramientas > Usuarios > Copiar reglas).':'')); }
+}
+function chatResponder(btn){
+  var cm=btn.closest('.cm'), m=(window._chatMsgs||{})[cm.getAttribute('data-id')]; if(!m) return;
+  _chatResp={id:cm.getAttribute('data-b'),de:m.de,texto:String(m.texto||'').slice(0,120)};
+  chatRespPintar(); var t=document.getElementById('chat-txt'); if(t) t.focus();
+}
+function chatRespPintar(){
+  var box=document.getElementById('chat-resp'); if(!box) return;
+  if(!_chatResp){ box.style.display='none'; return; }
+  box.style.display='flex';
+  document.getElementById('chat-resp-q').textContent='Respondiendo a '+(_chatResp.de===_chatMe()?'vos':window.nombreUsuario(_chatResp.de));
+  document.getElementById('chat-resp-t').textContent=_chatResp.texto;
+}
+function chatCancelarResp(){ _chatResp=null; chatRespPintar(); }
+function chatIrA(b){
+  var el=document.querySelector('#chat-msgs .cm[data-b="'+String(b).replace(/"/g,'')+'"]');
+  if(!el){ _toast('El mensaje original ya no está (se borran a los 7 días).'); return; }
+  el.scrollIntoView({block:'center',behavior:'smooth'}); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+}
 function chatRender(){
   _chatDetectarNuevos();
   chatSonidoIcono();
@@ -4189,7 +4288,9 @@ function chatRender(){
     var mine=m.de===me, d=new Date(m.t||Date.now());
     var hora=String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
     var quien=mine?'Vos':window.nombreUsuario(m.de);
-    return '<div class="cm'+(mine?' mine':'')+'"><div class="cm-h">'+_chatEsc(quien)+' · '+hora+'</div><div class="cm-t">'+_chatEsc(m.texto)+'</div>'+
+    var bid=String(m.id).replace(/_[01]$/,'');
+    var cita=m.resp?'<div class="cm-q" data-b="'+_chatEsc(m.resp.id)+'" onclick="chatIrA(this.dataset.b)"><b>'+_chatEsc(m.resp.de===me?'Vos':window.nombreUsuario(m.resp.de))+'</b><span>'+_chatEsc(m.resp.texto)+'</span></div>':'';
+    return '<div class="cm'+(mine?' mine':'')+'" data-b="'+_chatEsc(bid)+'" data-id="'+_chatEsc(m.id)+'"><div class="cm-a"><button title="Responder a este mensaje" onclick="chatResponder(this)">&#8617;</button><button title="Reaccionar" onclick="chatPopReac(this)">&#9786;</button></div><div class="cm-h">'+_chatEsc(quien)+' · '+hora+'</div>'+cita+'<div class="cm-t">'+_chatEsc(m.texto)+'</div>'+_chatReacHtml(m)+
       (mine&&String(m.conv).indexOf('dm:')===0?'<div class="cm-r'+(m.leido?' ok':'')+'">'+(m.leido?'✓✓ Leído '+_chatHora(m.leido):'✓ Enviado')+'</div>':'')+
       (m.clienteId?'<button class="cm-c" data-id="'+_chatEsc(m.clienteId)+'" onclick="chatAbrirCliente(this.dataset.id)">📎 '+_chatEsc(m.clienteNombre||'Cliente')+'</button>':'')+'</div>';
   }).join('');
@@ -4208,7 +4309,7 @@ function chatToggle(){
   document.getElementById('chat-panel').classList.toggle('open',_chatAbierto);
   if(_chatAbierto){ chatRender(); setTimeout(function(){ var t=document.getElementById('chat-txt'); if(t) t.focus(); },60); }
 }
-function chatSel(id){ _chatConvAct=id; chatRender(); var t=document.getElementById('chat-txt'); if(t) t.focus(); }
+function chatSel(id){ if(id!==_chatConvAct){ _chatResp=null; chatRespPintar(); } chatPopCerrar(); _chatConvAct=id; chatRender(); var t=document.getElementById('chat-txt'); if(t) t.focus(); }
 function chatAdjuntar(){
   if(!_chatAdj){
     if(typeof clienteActivo==='undefined'||!clienteActivo){ alert('Primero abrí un cliente para poder adjuntarlo.'); return; }
@@ -4224,8 +4325,8 @@ async function chatEnviarUI(){
   var cli=(_chatAdj&&typeof clienteActivo!=='undefined'&&clienteActivo)?{id:clienteActivo.id,nombre:clienteActivo.nombre}:null;
   var btn=document.getElementById('chat-send'); btn.disabled=true;
   try{
-    await window.chatEnviar(_chatConvAct,txt,cli);
-    t.value=''; if(_chatAdj) chatAdjuntar();
+    await window.chatEnviar(_chatConvAct,txt,cli,_chatResp);
+    t.value=''; if(_chatAdj) chatAdjuntar(); _chatResp=null; chatRespPintar();
   }catch(e){
     alert('No se pudo enviar el mensaje.'+((e&&e.code==='permission-denied')?'\n\nFalta habilitar los mensajes en las reglas de Firestore (Herramientas > Usuarios).':''));
   }
