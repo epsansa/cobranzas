@@ -1012,7 +1012,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.22.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.23.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1950,66 +1950,84 @@ function renderCuenta(){
   ${generarSeccionDS(c)}`;
 }
 
-// Créditos que entran al cálculo de deuda, con su posición real en c.creditos
-function _dsItems(c){
-  var ENT=['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'];
-  var todos=(c.creditos||[]).map(function(cr,i){return {cr:cr,i:i};});
-  var f=todos.filter(function(it){return (it.cr.entidad||'').toUpperCase().split(' ').some(function(p){return ENT.indexOf(p)>=0;});});
-  return f.length?f:todos;
+// ===================================================
+// ACTUALIZACION DE DEUDA por entidad (un bloque por cada entidad del cliente)
+// ===================================================
+// Agrupa los creditos del cliente por entidad, conservando la posicion real en c.creditos
+function _dsGrupos(c){
+  var g={}, orden=[];
+  (c.creditos||[]).forEach(function(cr,i){
+    var e=String(cr.entidad||c.entidad||'SIN ENTIDAD').trim()||'SIN ENTIDAD';
+    if(!g[e]){ g[e]=[]; orden.push(e); }
+    g[e].push({cr:cr,i:i});
+  });
+  return orden.map(function(e){ return {entidad:e,items:g[e]}; });
 }
-function dsToggleTodos(v){
-  document.querySelectorAll('.ds-chk').forEach(function(x){x.checked=v;});
-  dsCambioSel();
+function dsToggleTodos(g,v){
+  document.querySelectorAll('.ds-chk[data-g="'+g+'"]').forEach(function(x){x.checked=v;});
+  dsCambioSel(g);
 }
-function dsCambioSel(){
-  var all=document.querySelectorAll('.ds-chk'), t=document.getElementById('ds-todos');
+function dsCambioSel(g){
+  var all=document.querySelectorAll('.ds-chk[data-g="'+g+'"]'), t=document.getElementById('ds-todos-'+g);
   if(t) t.checked=Array.prototype.every.call(all,function(x){return x.checked;});
-  var r=document.getElementById('ds-resultado');
-  if(r && r.innerHTML.trim()) calcDS(); // si ya había un cálculo, se actualiza solo
+  var r=document.getElementById('ds-resultado-'+g);
+  if(r && r.innerHTML.trim()) calcDS(g); // si ya habia un calculo, se actualiza solo
 }
 function generarSeccionDS(c){
-  var esDS=(c.creditos||[]).some(function(cr){return (cr.entidad||'').toUpperCase().split(' ').some(function(p){return ['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'].indexOf(p)>=0;});})
-    ||(c.entidad||'').toUpperCase().split(' ').some(function(p){return ['DEPORT','SUMAX','ECOCRED','PROYECTO','ONIX','CONSUMAS'].indexOf(p)>=0;});
-  if(!esDS) return '';
-  var html='<div class="card" style="border-top:3px solid #2557a7;margin-top:4px">';
-  html+='<div class="card-hdr"><div class="card-title">Actualizaci\u00f3n de deuda — Deport Show</div></div>';
-  html+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">';
-  html+='<div class="fld" style="flex:1"><label>Tasa punitoria mensual (%)</label><input type="number" id="ds-tasa" value="15" step="0.5" style="width:100%;padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none"></div>';
-  html+='<button class="btn btn-dark" onclick="calcDS()" style="margin-top:14px">Calcular</button>';
-  html+='</div>';
-  var itemsDS=_dsItems(c);
-  if(itemsDS.length>1){
-    html+='<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="ds-todos" checked onchange="dsToggleTodos(this.checked)"> Incluir todos los cr\u00e9ditos</label>';
-  }
-  itemsDS.forEach(function(it){
-    var cr=it.cr;
-    html+='<label style="display:flex;align-items:center;gap:8px;background:#f4f8fd;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:12px;cursor:pointer">';
-    html+='<input type="checkbox" class="ds-chk" value="'+it.i+'" checked onchange="dsCambioSel()"> <span>';
-    html+='<strong>'+(cr.num||'Sin n\u00famero')+'</strong>  &middot;  Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong>  &middot;  Mora: <strong>'+(fmtDMA(cr.fecha)||'—')+'</strong>';
-    html+='</span></label>';
-  });
-  html+='<div id="ds-resultado"></div></div>';
-  return html;
+  var grupos=_dsGrupos(c);
+  if(!grupos.length) return '';
+  var inp='padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;width:100%;box-sizing:border-box';
+  return grupos.map(function(gr,g){
+    var html='<div class="card" style="border-top:3px solid #2557a7;margin-top:4px">';
+    html+='<div class="card-hdr"><div class="card-title">Actualización de deuda — '+_escU(gr.entidad)+'</div></div>';
+    html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;align-items:end;margin-bottom:12px">';
+    html+='<div class="fld"><label>Tasa punitoria mensual (%)</label><input type="number" id="ds-tasa-'+g+'" value="15" step="0.5" style="'+inp+'"></div>';
+    html+='<div class="fld"><label>Anticipo mínimo ($)</label><input type="number" id="ds-ant-'+g+'" placeholder="automático" step="10000" style="'+inp+'"></div>';
+    html+='<div class="fld"><label>Interés mensual 9 y 12 cuotas (%)</label><input type="number" id="ds-int-'+g+'" value="6" step="0.5" style="'+inp+'"></div>';
+    html+='<div class="fld"><label>Vigencia (días)</label><input type="number" id="ds-vig-'+g+'" value="7" min="1" style="'+inp+'"></div>';
+    html+='<button class="btn btn-dark" onclick="calcDS('+g+')">Calcular</button>';
+    html+='</div>';
+    if(gr.items.length>1){
+      html+='<label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;margin-bottom:6px;cursor:pointer"><input type="checkbox" id="ds-todos-'+g+'" checked onchange="dsToggleTodos('+g+',this.checked)"> Incluir todos los créditos</label>';
+    }
+    gr.items.forEach(function(it){
+      var cr=it.cr;
+      html+='<label style="display:flex;align-items:center;gap:8px;background:#f4f8fd;border-radius:7px;padding:8px 10px;margin-bottom:6px;font-size:12px;cursor:pointer">';
+      html+='<input type="checkbox" class="ds-chk" data-g="'+g+'" value="'+it.i+'" checked onchange="dsCambioSel('+g+')"> <span>';
+      html+='<strong>'+_escU(cr.num||'Sin número')+'</strong>  &middot;  Capital: <strong>$'+parseFloat(cr.capital||0).toLocaleString('es-AR')+'</strong>  &middot;  Mora: <strong>'+(fmtDMA(cr.fecha)||'—')+'</strong>';
+      html+='</span></label>';
+    });
+    html+='<div id="ds-resultado-'+g+'"></div></div>';
+    return html;
+  }).join('');
 }
 
-function calcDS(){
-  var c=clienteActivo;
-  var tasaMens=(parseFloat((document.getElementById('ds-tasa')||{value:15}).value)||15)/100;
-  var sel=Array.prototype.map.call(document.querySelectorAll('.ds-chk:checked'),function(x){return parseInt(x.value,10);});
-  var credsDS=_dsItems(c).filter(function(it){return sel.indexOf(it.i)>=0;}).map(function(it){return it.cr;});
-  if(!credsDS.length){ document.getElementById('ds-resultado').innerHTML='<div style="color:#a32d2d;font-size:12px;padding:6px 0">Eleg\u00ed al menos un cr\u00e9dito para calcular.</div>'; return; }
+function calcDS(g){
+  g=g||0;
+  var c=clienteActivo, grupo=_dsGrupos(c)[g];
+  var out=document.getElementById('ds-resultado-'+g);
+  if(!grupo||!out) return;
+  var num=function(id,def){ var el=document.getElementById(id), v=el?parseFloat(el.value):NaN; return isNaN(v)?def:v; };
+  var tasaMens=(num('ds-tasa-'+g,15)||15)/100;
+  var intMens=Math.max(0,num('ds-int-'+g,6))/100;
+  var vigDias=Math.max(1,Math.round(num('ds-vig-'+g,7)));
+  var sel=Array.prototype.map.call(document.querySelectorAll('.ds-chk[data-g="'+g+'"]:checked'),function(x){return parseInt(x.value,10);});
+  var credsDS=grupo.items.filter(function(it){return sel.indexOf(it.i)>=0;}).map(function(it){return it.cr;});
+  if(!credsDS.length){ out.innerHTML='<div style="color:#a32d2d;font-size:12px;padding:6px 0">Elegí al menos un crédito para calcular.</div>'; return; }
   var rd=function(n){return Math.round(n/100)*100;};
+  var rup=function(n){return Math.ceil(n/100-1e-9)*100;};
+  var r1000=function(n){return Math.round(n/1000)*1000;};
   var fmt=function(n){return '$'+Math.round(n).toLocaleString('es-AR');};
   var fHoy=new Date();
-  function cuotaFn(t,r,n){return t*r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1);}
+  function cuotaFn(t,r,n){ return r>0 ? t*r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1) : t/n; }
 
   var totalCapital=0,totalPunitorios=0,diasAtraso=0;
   credsDS.forEach(function(cr){
     var capital=parseFloat(cr.capital)||0;
     if(!capital) return;
     var fVto=fHoy;
-var _fm=parseFechaFlex(cr.fecha);
-if(_fm) fVto=_fm; else if(cr.fecha){ var _fd=new Date(cr.fecha); if(!isNaN(_fd)) fVto=_fd; }
+    var fm=parseFechaFlex(cr.fecha);
+    if(fm) fVto=fm; else if(cr.fecha){ var fd=new Date(cr.fecha); if(!isNaN(fd)) fVto=fd; }
     var dias=Math.max(0,Math.round((fHoy-fVto)/(1000*60*60*24)));
     diasAtraso=Math.max(diasAtraso,dias);
     totalCapital+=capital;
@@ -2028,81 +2046,81 @@ if(_fm) fVto=_fm; else if(cr.fecha){ var _fd=new Date(cr.fecha); if(!isNaN(_fd))
   var hon1p=rd(sub1p*honPct);
   var total1p=rd(sub1p+hon1p);
 
-  // Cuotas sobre deuda actualizada total
-  var c3=rd(deudaAct/3);
-  var c6=rd(deudaAct/6);
-  var c9=rd(cuotaFn(deudaAct,0.03,9));
-  var c12=rd(cuotaFn(deudaAct,0.03,12));
-  var c15=rd(cuotaFn(deudaAct,0.03,15));
+  // Financiacion: anticipo minimo (si no se carga, ~7% de la deuda redondeado a $10.000) y cuotas sobre el resto
+  var antIn=document.getElementById('ds-ant-'+g), antVal=antIn?parseFloat(antIn.value):NaN;
+  var anticipo=(!isNaN(antVal)&&antVal>0)?antVal:Math.min(deudaAct,Math.round(deudaAct*0.07/10000)*10000);
+  var saldoFin=Math.max(0,deudaAct-anticipo);
+  var c3=rup(saldoFin/3), c6=rup(saldoFin/6);
+  var c9=r1000(cuotaFn(saldoFin,intMens,9)), c12=r1000(cuotaFn(saldoFin,intMens,12));
 
+  var vence=new Date(fHoy.getTime()+vigDias*864e5);
   var honLabel='Honorarios ('+Math.round(honPct*100)+'%)';
   var html='';
-
-  // Métricas
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">';
-  html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">D\u00edas de atraso</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+diasAtraso+'</div></div>';
+  html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">Días de atraso</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+diasAtraso+'</div></div>';
   html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">Punitorios</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+fmt(totalPunitorios)+'</div></div>';
   html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">Sub total</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+fmt(subtotal)+'</div></div>';
   html+='<div style="background:#f4f8fd;border-radius:7px;padding:10px"><div style="font-size:10px;color:#4a6a9a">'+honLabel+'</div><div style="font-size:16px;font-weight:600;color:#1a3a6b">'+fmt(honorarios)+'</div></div>';
-  html+='<div style="background:#EAF3DE;border-radius:7px;padding:10px;grid-column:span 2"><div style="font-size:10px;color:#27500A">Deuda actualizada</div><div style="font-size:20px;font-weight:600;color:#27500A">'+fmt(deudaAct)+'</div></div>';
+  html+='<div style="background:#EAF3DE;border-radius:7px;padding:10px;grid-column:span 2"><div style="font-size:10px;color:#27500A">Deuda actualizada (vigente hasta el '+fmtDMA(vence)+')</div><div style="font-size:20px;font-weight:600;color:#27500A">'+fmt(deudaAct)+'</div></div>';
   html+='</div>';
 
-  // Opciones pago total
   html+='<div style="font-size:10px;font-weight:700;color:#2557a7;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Opciones de pago</div>';
   var ops=[
-    {label:'1 pago',nota:'con descuento',monto:total1p},
-    {label:'3 cuotas',nota:'sin inter\u00e9s',monto:c3},
-    {label:'6 cuotas',nota:'sin inter\u00e9s',monto:c6},
-    {label:'9 cuotas',nota:'',monto:c9},
-    {label:'12 cuotas',nota:'',monto:c12},
-    {label:'15 cuotas',nota:'',monto:c15},
+    {label:'Pago único',nota:'con descuento',monto:total1p},
+    {label:'Anticipo mínimo',nota:'luego financiación',monto:anticipo},
+    {label:'  • 3 cuotas',nota:'',monto:c3},
+    {label:'  • 6 cuotas',nota:'',monto:c6},
+    {label:'  • 9 cuotas',nota:'',monto:c9},
+    {label:'  • 12 cuotas',nota:'',monto:c12}
   ];
   html+='<div style="font-size:12px;margin-bottom:12px">';
-  ops.forEach(function(o,i){
+  ops.forEach(function(o){
     html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0f0ec">';
-    html+='<span style="color:#555">'+(i+1)+') '+o.label+'</span>';
+    html+='<span style="color:#555">'+o.label+'</span>';
     html+='<span>'+(o.nota?'<span style="font-size:10px;color:#aaa;margin-right:8px">'+o.nota+'</span>':'')+'<strong>'+fmt(o.monto)+'</strong></span>';
     html+='</div>';
   });
   html+='</div>';
 
-  // Guardar texto para copiar
-  var nombre=c.nombre||'';
-  var dni=c.dni||'';
-  var credNums=(credsDS.map(function(cr){return cr.num||'';}).filter(Boolean).join(', '))||'';
-  var comercio=credsDS[0]&&credsDS[0].comercio||'';
-  var entidad=credsDS[0]&&credsDS[0].entidad||c.entidad||'DEPORT SHOW';
+  // Texto para copiar y pegar (WhatsApp / mail)
+  var P=(typeof _pagoEnt==='function')?_pagoEnt(grupo.entidad):{};
+  var credNums=credsDS.map(function(cr){return cr.num||'';}).filter(Boolean).join(', ');
+  var comercio=credsDS.map(function(cr){return cr.comercio||'';}).filter(Boolean).filter(function(v,i,a){return a.indexOf(v)===i;}).join(', ');
+  var txt=
+    '*INFORMACION Y MODALIDAD DE PAGO ULTIMA CONCILIACION*\n\n'+
+    'TITULAR: '+String(c.nombre||'').trim()+'\n'+
+    '*DNI: '+(c.dni||'')+'\n'+
+    '*DEUDA CON FINANCIERA: '+grupo.entidad+'*\n'+
+    (comercio?'*COMERCIO: '+comercio+'\n':'')+
+    '*CREDITO / S: '+credNums+'\n\n\n'+
+    '*USTED ADEUDA A NUESTRA MANDANTE LA SUMA DE:*\n\n'+
+    'Deuda actualizada: '+fmt(deudaAct)+' (vigente hasta el '+fmtDMA(vence)+').\n\n'+
+    'Opciones de pago:\n'+
+    '1) Pago único con descuento: '+fmt(total1p)+' \n\n'+
+    '2) Anticipo mínimo '+fmt(anticipo)+' y luego opciones de financiacion\n\n'+
+    '* 3 cuotas de '+fmt(c3)+' \n'+
+    '* 6 cuotas de '+fmt(c6)+'\n'+
+    '* 9 cuotas de '+fmt(c9)+'\n'+
+    '* 12 cuotas de '+fmt(c12)+'\n\n'+
+    'Medios de pago (previa confirmación con nosotros): efectivo o transferencia.\n\n'+
+    'Por favor, respondé con el número de la opción que elegís dentro de las 24 hs y coordinamos el pago. Si tenés alguna duda, estamos a disposición.\n\n'+
+    'Atte.\n'+
+    'EQUIPO DE MEDIACIONES EPSAN \n'+
+    '📲 WhatsApp: '+(P.wsp||'541137680485')+'\n'+
+    '☎️ '+(P.tel||'(011) 5263-2697');
+  window._dsTxt=window._dsTxt||{}; window._dsTxt[g]=txt;
 
-  var txtCopy=
-    'ENTIDAD: '+entidad+'\n'+
-    'TITULAR: '+nombre+'\n'+
-    'DNI: '+dni+'\n'+
-    (credNums?'CR\u00c9DITO/S: '+credNums+'\n':'')+
-    (comercio?'COMERCIO: '+comercio+'\n':'')+
-    '\nDEUDA ACTUALIZADA: '+fmt(deudaAct)+'\n\n'+
-    '1) 1 pago (con descuento): '+fmt(total1p)+'\n\n'+
-    '2) 3 cuotas sin inter\u00e9s: '+fmt(c3)+'\n\n'+
-    '3) 6 cuotas sin inter\u00e9s: '+fmt(c6)+'\n\n'+
-    '4) 9 cuotas: '+fmt(c9)+'\n\n'+
-    '5) 12 cuotas: '+fmt(c12)+'\n\n'+
-    '6) 15 cuotas: '+fmt(c15);
-
-  html+='<button class="btn btn-green" onclick="copiarResumenDS()" style="width:100%">&#128203; Copiar para WhatsApp / Mail</button>';
-  html+='<div id="ds-txt-oculto" style="display:none">'+txtCopy+'</div>';
-
-  document.getElementById('ds-resultado').innerHTML=html;
+  html+='<button class="btn btn-green" id="ds-copiar-'+g+'" onclick="copiarResumenDS('+g+')" style="width:100%">&#128203; Copiar para WhatsApp / Mail</button>';
+  out.innerHTML=html;
 }
 
-function copiarResumenDS(){
-  var el=document.getElementById('ds-txt-oculto');
-  if(!el) return;
-  var txt=el.textContent;
-  navigator.clipboard.writeText(txt).then(function(){
-    var btn=document.querySelector('#ds-resultado .btn-green');
-    if(btn){var orig=btn.innerHTML;btn.innerHTML='&#10003; Copiado!';setTimeout(function(){btn.innerHTML=orig;},2000);}
-  }).catch(function(){
-    var ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);
-  });
+function copiarResumenDS(g){
+  g=g||0;
+  var txt=(window._dsTxt||{})[g]; if(!txt) return;
+  var btn=document.getElementById('ds-copiar-'+g);
+  function ok(){ if(btn){ var o=btn.innerHTML; btn.innerHTML='&#10003; Copiado!'; setTimeout(function(){ btn.innerHTML=o; },2000); } }
+  function fb(){ var ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); ok(); }catch(e){} document.body.removeChild(ta); }
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok,fb); else fb();
 }
 // -- TAB TRAMITES --
 // El administrador puede editar cualquier trámite. Un usuario, solo el ULTIMO que cargó él mismo en ese cliente.
@@ -4560,7 +4578,7 @@ function _regTramiteAuto(tipo,nota,tel){
 // PLANTILLAS DE MENSAJES + DATOS DE PAGO
 // ===================================================
 var PLANT_DEFAULT={
-  pago:{empresa:'EPSAN',alias:'',cbu:'',titular:'',banco:'',wsp:''},
+  pago:{empresa:'EPSAN',alias:'',cbu:'',titular:'',banco:'',wsp:'',tel:''},
   plantillas:[
     {id:'p1',nombre:'Recordatorio de cuota a vencer',canal:'wsp',asunto:'',texto:'Hola {nombre}, te escribimos de {empresa}.\nTe recordamos que tu cuota {cuota_nro} de {producto} vence el {cuota_vto} por {cuota_monto}.\n\nPodés abonar por transferencia al alias *{alias}* (titular {titular_cuenta}). Cuando lo hagas, enviá el comprobante por este chat.\n\nGracias.\n{usuario} – {empresa}'},
     {id:'p2',nombre:'Cuota vencida',canal:'wsp',asunto:'',texto:'Hola {nombre}, te contactamos de {empresa} por tu {producto} ({entidad}).\nRegistramos {cuotas_vencidas} cuota/s vencida/s. El saldo pendiente es {saldo_total}.\n\n¿Podés comunicarte para acordar una forma de pago? Estamos para ayudarte a regularizar tu situación.\n\n{usuario} – {empresa}'},
@@ -4606,7 +4624,7 @@ function _cuotasPend(c){
 // Datos de pago de una entidad: si tiene alias propio usa los suyos; si no, los generales
 function _pagoEnt(ent){
   var pl=_plant(), g=pl.pago, e=ent?pl.porEntidad[ent]:null;
-  if(e && e.alias) return {empresa:e.empresa||g.empresa,alias:e.alias,cbu:e.cbu||'',titular:e.titular||'',banco:e.banco||'',wsp:e.wsp||g.wsp};
+  if(e && e.alias) return {empresa:e.empresa||g.empresa,alias:e.alias,cbu:e.cbu||'',titular:e.titular||'',banco:e.banco||'',wsp:e.wsp||g.wsp,tel:e.tel||g.tel};
   return g;
 }
 function _entDeCuota(c,ref){
@@ -4735,7 +4753,7 @@ function renderPlantillasAdmin(){
     '<div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Se usan en los mensajes y en la imagen de pago de cada cuota. Elegí una entidad para cargarle una cuenta propia; las entidades sin cuenta propia usan los datos generales.</div>'+
     '<div class="fld" style="max-width:360px;margin-bottom:10px"><label>Cuenta de</label><select id="tpl-pent" onchange="tplPagoEnt()"><option value="">General (todas las entidades)</option>'+(DB.entidades||[]).map(function(e){ return '<option value="'+_escU(e)+'">'+_escU(e)+(_tplEdit.porEntidad[e]&&_tplEdit.porEntidad[e].alias?' ✓':'')+'</option>'; }).join('')+'</select></div>'+
     '<div class="g2" style="max-width:760px">'+campo('empresa','Nombre de la empresa',P.empresa,'EPSAN')+campo('alias','Alias para transferir',P.alias,'epsan.cobranzas')+
-      campo('cbu','CBU / CVU (opcional)',P.cbu)+campo('titular','Titular de la cuenta',P.titular)+campo('banco','Banco / billetera (opcional)',P.banco)+campo('wsp','WhatsApp de la empresa (para comprobantes)',P.wsp,'11 5555 1234')+'</div>'+
+      campo('cbu','CBU / CVU (opcional)',P.cbu)+campo('titular','Titular de la cuenta',P.titular)+campo('banco','Banco / billetera (opcional)',P.banco)+campo('wsp','WhatsApp de la empresa (para comprobantes y mensaje de deuda)',P.wsp,'541137680485')+campo('tel','Teléfono de la empresa (mensaje de deuda)',P.tel,'(011) 5263-2697')+'</div>'+
     '<div class="btn-row"><button class="btn btn-dark" onclick="tplGuardarPago()">Guardar datos de pago</button><button class="btn btn-outline" id="tpl-pquitar" style="display:none" onclick="tplQuitarPagoEnt()">Quitar cuenta propia</button></div></div>'+
   '<div class="card"><div class="card-title" style="margin-bottom:6px">Plantillas de mensajes</div>'+
     '<div style="font-size:12px;color:#666;margin-bottom:8px;line-height:1.5">Elegí una para editarla. Las variables entre llaves se reemplazan con los datos de cada cliente. Si una variable no tiene valor, esa línea no aparece.</div>'+
@@ -4769,7 +4787,7 @@ function tplInsertar(v){
 function _tplPersistir(msg){
   return window.plantillasGuardar({pago:_tplEdit.pago,porEntidad:_tplEdit.porEntidad,plantillas:_tplEdit.plantillas}).then(function(){ _toast(msg); }).catch(function(e){ alert('No se pudo guardar: '+(e.message||e)); });
 }
-var _TPL_CAMPOS=['empresa','alias','cbu','titular','banco','wsp'];
+var _TPL_CAMPOS=['empresa','alias','cbu','titular','banco','wsp','tel'];
 function tplPagoEnt(){
   var ent=document.getElementById('tpl-pent').value, src=ent?(_tplEdit.porEntidad[ent]||{}):_tplEdit.pago;
   _TPL_CAMPOS.forEach(function(k){ document.getElementById('tpl-'+k).value=src[k]||''; });
