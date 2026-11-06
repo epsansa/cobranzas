@@ -688,6 +688,60 @@ window.presenciaDetener = async function(avisar){
   window._pres = {};
 };
 
+// -- ARCHIVOS (libros de Excel guardados en el sistema) --
+// coleccion "archivos" = datos del archivo; coleccion "archivos_partes" = contenido en trozos de ~600 KB (base64)
+window._archivos = []; window._archCache = {}; window._archErr = '';
+window.archIniciar = function(rol){
+  window.archDetener();
+  const q = (rol==='admin') ? query(collection(db_fs,'archivos')) : query(collection(db_fs,'archivos'), where('usuarios','==',true));
+  window._archUnsub = onSnapshot(q, function(sn){
+    const a = []; sn.forEach(function(d){ a.push(Object.assign({id:d.id}, d.data())); });
+    a.sort(function(x,y){ return (y.t||0)-(x.t||0); });
+    window._archivos = a; window._archErr = '';
+    if(window.archRender) window.archRender();
+  }, function(e){ window._archErr = e.code||e.message; if(window.archRender) window.archRender(); });
+};
+window.archDetener = function(){
+  if(window._archUnsub){ try{window._archUnsub();}catch(e){} window._archUnsub = null; }
+  window._archivos = []; window._archCache = {};
+};
+function _b64de(u8){ let s=''; for(let i=0;i<u8.length;i+=32768){ s += String.fromCharCode.apply(null, u8.subarray(i,i+32768)); } return btoa(s); }
+window.archSubir = async function(id, meta, bytes, partesAnt){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador puede subir archivos');
+  const TAM = 600000, n = Math.max(1, Math.ceil(bytes.length/TAM));
+  for(let i=0;i<n;i++){
+    await setDoc(doc(db_fs,'archivos_partes',id+'_'+i), { aid:id, i:i, d:_b64de(bytes.subarray(i*TAM,(i+1)*TAM)) });
+  }
+  for(let i=n;i<(partesAnt||0);i++){ try{ await deleteDoc(doc(db_fs,'archivos_partes',id+'_'+i)); }catch(e){} }
+  await setDoc(doc(db_fs,'archivos',id), Object.assign({}, meta, { n:n, size:bytes.length, t:Date.now() }));
+  delete window._archCache[id];
+};
+window.archLeer = async function(id, n){
+  if(window._archCache[id]) return window._archCache[id];
+  const partes = [];
+  for(let i=0;i<n;i++){
+    const sn = await getDoc(doc(db_fs,'archivos_partes',id+'_'+i));
+    if(!sn.exists()) throw new Error('Falta una parte del archivo (subilo de nuevo).');
+    partes.push(atob(sn.data().d));
+  }
+  const bin = partes.join(''), u8 = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+  window._archCache[id] = u8;
+  return u8;
+};
+window.archActualizar = async function(id, cambios){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador');
+  const act = (window._archivos||[]).find(function(a){ return a.id===id; }) || {};
+  const m = Object.assign({}, act); delete m.id;
+  await setDoc(doc(db_fs,'archivos',id), Object.assign(m, cambios));
+};
+window.archBorrar = async function(id, n){
+  if(window._ROL!=='admin') throw new Error('Solo el administrador');
+  for(let i=0;i<(n||0);i++){ try{ await deleteDoc(doc(db_fs,'archivos_partes',id+'_'+i)); }catch(e){} }
+  await deleteDoc(doc(db_fs,'archivos',id));
+  delete window._archCache[id];
+};
+
 // -- AUTH STATE --
 onAuthStateChanged(auth, async function(user){
   if(user){
@@ -708,6 +762,7 @@ onAuthStateChanged(auth, async function(user){
     mostrarApp();
     window.chatIniciar(user.email);
     window.presenciaIniciar(user.email);
+    window.archIniciar(rol);
     if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} }
     window._unsubPlant = onSnapshot(PLANT_REF, function(sn){ window._plantDoc = sn.exists()?sn.data():null; }, function(){});
     if(rol==='admin'){ setTimeout(function(){ if(typeof window.backupAutoIniciar==='function') window.backupAutoIniciar(); },15000); }
@@ -736,6 +791,7 @@ onAuthStateChanged(auth, async function(user){
     if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} window._unsubUsr=null; }
     if(window.chatDetener) window.chatDetener();
     if(window.presenciaDetener) window.presenciaDetener(false);
+    if(window.archDetener) window.archDetener();
     if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} window._unsubPlant=null; }
     window._plantDoc=null;
     window._ROL='usuario';
@@ -1012,13 +1068,14 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.23.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.24.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
   <div class="modnav" style="margin-left:12px">
     <div class="mb active" onclick="setMod('admin',this)">Administraci&#243;n</div>
     <div class="mb" onclick="setMod('consultas',this)">Consultas</div>
+    <div class="mb" onclick="setMod('archivos',this)">&#128193; Archivos</div>
     <div class="mb solo-admin" onclick="setMod('herramientas',this)">Herramientas</div>
   </div>
   <div class="topnav-right">
@@ -1187,6 +1244,15 @@ body.rol-usuario .solo-admin{display:none!important}
   &#9888;&#65039; <strong>Backup autom&#225;tico pendiente.</strong> <button class="btn btn-dark btn-sm" onclick="hacerBackup()">Hacer backup ahora</button> <button class="btn btn-outline btn-sm" onclick="document.getElementById('bk-banner').style.display='none'">M&#225;s tarde</button>
 </div>
 <div id="toast-msg" style="display:none;position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:400;background:#1a3a6b;color:#fff;border-radius:20px;padding:9px 18px;font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.25)"></div>
+<div class="modal-overlay" id="modalArch"><div class="modal" style="max-width:96vw;width:1100px;max-height:92vh;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 id="ar-tit" style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Archivo</h3>
+    <input id="ar-q" placeholder="Buscar en la hoja…" oninput="archFiltrar()" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;outline:none;width:200px">
+    <button class="btn btn-outline btn-sm" onclick="archDescargarAbierto()">&#11015; Descargar</button>
+    <button class="btn btn-outline btn-sm" onclick="cerrarModal('modalArch')">Cerrar</button></div>
+  <div id="ar-hojas" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px"></div>
+  <div id="ar-info" style="font-size:11px;color:#888;margin-bottom:4px"></div>
+  <div id="ar-tabla" style="overflow:auto;flex:1;min-height:200px;border:1px solid #e1e6ef;border-radius:8px"></div>
+</div></div>
 <div class="modal-overlay" id="modalAlcance"><div class="modal" style="max-width:520px">
   <h3 id="alc-tit">Alcance en Avanzadas</h3>
   <div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Define qu&#233; entidades y carteras puede ver este usuario en el filtro <strong>Avanzadas</strong>. No cambia la b&#250;squeda de un cliente. Si marc&#225;s entidades y carteras, ve lo que cumpla ambas.</div>
@@ -1307,6 +1373,7 @@ function setMod(mod, el){
   if(mod==='admin'){ renderLista(); if(clienteActivo) renderFicha(); else renderWelcome(); }
   else if(mod==='consultas') renderConsultas();
   else if(mod==='herramientas') renderHerramientas();
+  else if(mod==='archivos') renderArchivos();
 }
 
 // ===================================================
@@ -4031,6 +4098,14 @@ const REGLAS_FIRESTORE = [
 "      allow read: if habilitado();",
 "      allow write: if esAdmin();",
 "    }",
+"    match /archivos/{id} {",
+"      allow read: if esAdmin() || (habilitado() && resource.data.usuarios == true);",
+"      allow write: if esAdmin();",
+"    }",
+"    match /archivos_partes/{pid} {",
+"      allow read: if esAdmin() || (habilitado() && get(/databases/$(database)/documents/archivos/$(resource.data.aid)).data.usuarios == true);",
+"      allow write: if esAdmin();",
+"    }",
 "    match /comprobantes/{id} {",
 "      allow read, create: if habilitado();",
 "      allow delete: if esAdmin();",
@@ -5225,6 +5300,133 @@ window.presPintar=presPintar;
 setInterval(presPintar,60000);
 
 // ===================================================
+// ARCHIVOS: libros de Excel guardados en el sistema
+// ===================================================
+var ARCH_MAX=8*1024*1024;
+function _archTam(b){ return b>=1048576?(b/1048576).toFixed(1)+' MB':Math.max(1,Math.round(b/1024))+' KB'; }
+function renderArchivos(){
+  var adm=window.esAdmin(), lista=window._archivos||[], el=document.getElementById('mainArea'); if(!el) return;
+  var err=window._archErr?'<div style="color:#c0392b;font-size:12px;margin-bottom:8px">No se pueden leer los archivos ('+_escU(window._archErr)+'). Revisá que las reglas de Firestore estén actualizadas (Herramientas &gt; Usuarios &gt; Copiar reglas).</div>':'';
+  var filas=lista.map(function(a){
+    var d=new Date(a.t||Date.now());
+    return '<tr><td style="font-weight:600">&#128196; '+_escU(a.nombre)+'</td><td>'+_archTam(a.size||0)+'</td>'+
+      '<td>'+fmtDMA(d)+' '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+(a.por?' &middot; '+_escU(window.nombreUsuario(a.por)):'')+'</td>'+
+      (adm?'<td>'+(a.usuarios?'<span class="badge ba">Visible para usuarios</span>':'<span class="badge bp">Solo administrador</span>')+'</td>':'')+
+      '<td style="white-space:nowrap"><button class="btn btn-dark btn-sm" data-id="'+_escU(a.id)+'" onclick="archAbrir(this.dataset.id)">Abrir</button> '+
+        '<button class="btn btn-outline btn-sm" data-id="'+_escU(a.id)+'" onclick="archDescargar(this.dataset.id)">Descargar</button>'+
+        (adm?' <button class="btn btn-outline btn-sm" data-id="'+_escU(a.id)+'" onclick="archCompartir(this.dataset.id)" title="Cambiar quién lo ve">&#128065;</button>'+
+        ' <button class="btn btn-outline btn-sm" data-id="'+_escU(a.id)+'" onclick="archRenombrar(this.dataset.id)" title="Renombrar">&#9998;</button>'+
+        ' <button class="btn btn-outline btn-sm" data-id="'+_escU(a.id)+'" onclick="archReemplazar(this.dataset.id)" title="Reemplazar por una versión nueva">&#8635;</button>'+
+        ' <button class="btn btn-red btn-sm" data-id="'+_escU(a.id)+'" onclick="archEliminar(this.dataset.id)" title="Eliminar">&#10005;</button>':'')+'</td></tr>';
+  }).join('');
+  el.innerHTML='<div style="padding:16px;max-width:1100px">'+
+    '<div class="card-hdr" style="margin-bottom:10px"><div style="font-size:15px;font-weight:600">&#128193; Archivos</div>'+
+      (adm?'<button class="btn btn-dark btn-sm" onclick="document.getElementById(\'arch-file\').click()">+ Subir archivo</button><input type="file" id="arch-file" accept=".xlsx,.xls,.xlsm,.csv" style="display:none" onchange="archSubirUI(event)"><input type="file" id="arch-file2" accept=".xlsx,.xls,.xlsm,.csv" style="display:none" onchange="archReemplazarUI(event)">':'')+'</div>'+err+
+    (lista.length?'<div class="card"><table class="tbl" style="width:100%"><thead><tr><th>Archivo</th><th>Tamaño</th><th>Subido</th>'+(adm?'<th>Visibilidad</th>':'')+'<th></th></tr></thead><tbody>'+filas+'</tbody></table></div>':
+      '<div class="card" style="color:#999;font-size:13px">'+(adm?'Todavía no hay archivos. Subí un libro de Excel (.xlsx, .xls, .xlsm o .csv, hasta 8 MB).':'No hay archivos compartidos con vos.')+'</div>')+
+    '<div style="font-size:11px;color:#888;margin-top:8px">Se pueden abrir y consultar acá mismo (solo lectura) o descargar. Para modificar uno: descargalo, editalo y usá "Reemplazar".'+(adm?' Los archivos nuevos quedan visibles solo para el administrador hasta que los compartas con el ojo.':'')+'</div></div>';
+}
+window.archRender=function(){ if(typeof modActivo!=='undefined' && modActivo==='archivos') renderArchivos(); };
+function _archLeerArchivo(f){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ res(new Uint8Array(r.result)); }; r.onerror=function(){ rej(new Error('No se pudo leer el archivo.')); }; r.readAsArrayBuffer(f); }); }
+function _archValidar(f){
+  if(!/\.(xlsx|xls|xlsm|csv)$/i.test(f.name)){ alert('Solo se aceptan archivos de Excel (.xlsx, .xls, .xlsm) o .csv.'); return false; }
+  if(f.size>ARCH_MAX){ alert('El archivo pesa '+_archTam(f.size)+'. El máximo es 8 MB.'); return false; }
+  return true;
+}
+async function archSubirUI(e){
+  var f=e.target.files[0]; e.target.value=''; if(!f||!_archValidar(f)) return;
+  try{
+    _toast('Subiendo '+f.name+'…');
+    var bytes=await _archLeerArchivo(f), id='a_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    await window.archSubir(id,{nombre:f.name,usuarios:false,por:(window._fbUserEmail||'')},bytes,0);
+    _toast('Archivo guardado');
+  }catch(err){ alert('No se pudo subir: '+((err&&err.code==='permission-denied')?'faltan actualizar las reglas de Firestore.':(err.message||err))); }
+}
+var _archReempId=null;
+function archReemplazar(id){ _archReempId=id; document.getElementById('arch-file2').click(); }
+async function archReemplazarUI(e){
+  var f=e.target.files[0]; e.target.value=''; if(!f||!_archValidar(f)||!_archReempId) return;
+  var a=(window._archivos||[]).find(function(x){return x.id===_archReempId;}); if(!a) return;
+  if(!confirm('¿Reemplazar "'+a.nombre+'" por "'+f.name+'"? La versión actual se pierde.')) return;
+  try{
+    _toast('Subiendo…');
+    var bytes=await _archLeerArchivo(f);
+    await window.archSubir(a.id,{nombre:f.name,usuarios:!!a.usuarios,por:(window._fbUserEmail||'')},bytes,a.n||0);
+    _toast('Archivo reemplazado');
+  }catch(err){ alert('No se pudo reemplazar: '+(err.message||err)); }
+}
+async function archCompartir(id){
+  var a=(window._archivos||[]).find(function(x){return x.id===id;}); if(!a) return;
+  var nuevo=!a.usuarios;
+  if(!confirm(nuevo?'¿Hacer visible "'+a.nombre+'" para TODOS los usuarios? Podrán abrirlo y descargarlo.':'¿Dejar "'+a.nombre+'" visible solo para el administrador?')) return;
+  try{ await window.archActualizar(id,{usuarios:nuevo}); }catch(err){ alert('No se pudo cambiar: '+(err.message||err)); }
+}
+async function archRenombrar(id){
+  var a=(window._archivos||[]).find(function(x){return x.id===id;}); if(!a) return;
+  var n=prompt('Nuevo nombre del archivo:',a.nombre); if(n===null) return; n=n.trim(); if(!n) return;
+  try{ await window.archActualizar(id,{nombre:n}); }catch(err){ alert('No se pudo renombrar: '+(err.message||err)); }
+}
+async function archEliminar(id){
+  var a=(window._archivos||[]).find(function(x){return x.id===id;}); if(!a) return;
+  if(!confirm('¿Eliminar "'+a.nombre+'" definitivamente?')) return;
+  try{ await window.archBorrar(id,a.n||0); }catch(err){ alert('No se pudo eliminar: '+(err.message||err)); }
+}
+async function archDescargar(id){
+  var a=(window._archivos||[]).find(function(x){return x.id===id;}); if(!a) return;
+  try{
+    _toast('Preparando descarga…');
+    var u8=await window.archLeer(id,a.n||1), b=new Blob([u8]), l=document.createElement('a');
+    l.href=URL.createObjectURL(b); l.download=a.nombre; document.body.appendChild(l); l.click(); l.remove(); setTimeout(function(){ URL.revokeObjectURL(l.href); },4000);
+  }catch(err){ alert('No se pudo descargar: '+(err.message||err)); }
+}
+var _archAb=null; // {id, nombre, wb, hoja, filas}
+async function archAbrir(id){
+  var a=(window._archivos||[]).find(function(x){return x.id===id;}); if(!a) return;
+  if(typeof XLSX==='undefined'){ alert('No se pudo cargar el lector de Excel. Revisá tu conexión y recargá.'); return; }
+  try{
+    _toast('Abriendo '+a.nombre+'…');
+    var u8=await window.archLeer(id,a.n||1);
+    var wb=XLSX.read(u8,{type:'array',cellDates:true});
+    _archAb={id:id,nombre:a.nombre,wb:wb,hoja:0,filas:[]};
+    document.getElementById('ar-tit').textContent=a.nombre;
+    document.getElementById('ar-q').value='';
+    document.getElementById('modalArch').classList.add('open');
+    archHoja(0);
+  }catch(err){ alert('No se pudo abrir el archivo: '+(err.message||err)); }
+}
+function archHoja(k){
+  var ab=_archAb; if(!ab) return;
+  ab.hoja=k;
+  var nombres=ab.wb.SheetNames;
+  document.getElementById('ar-hojas').innerHTML=nombres.map(function(n,i){
+    return '<button class="btn btn-sm '+(i===k?'btn-dark':'btn-outline')+'" data-k="'+i+'" onclick="archHoja(parseInt(this.dataset.k,10))">'+_escU(n)+'</button>';
+  }).join('');
+  var ws=ab.wb.Sheets[nombres[k]];
+  ab.filas=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+  archFiltrar();
+}
+function archFiltrar(){
+  var ab=_archAb; if(!ab) return;
+  var q=(document.getElementById('ar-q').value||'').trim().toLowerCase(), MAXF=1500, MAXC=60;
+  var filas=ab.filas.map(function(f,i){ return {n:i+1,f:f}; });
+  if(q) filas=filas.filter(function(x){ return x.f.some(function(c){ return String(c).toLowerCase().indexOf(q)>=0; }); });
+  var total=filas.length, mostrar=filas.slice(0,MAXF);
+  var cols=0; ab.filas.forEach(function(f){ if(f.length>cols) cols=f.length; }); cols=Math.min(cols,MAXC);
+  var html='<table style="border-collapse:collapse;font-size:12px"><thead><tr><th style="position:sticky;top:0;background:#eef3fa;border:1px solid #dde3ee;padding:3px 6px;color:#888">#</th>';
+  for(var c=0;c<cols;c++) html+='<th style="position:sticky;top:0;background:#eef3fa;border:1px solid #dde3ee;padding:3px 8px;color:#47556b">'+XLSX.utils.encode_col(c)+'</th>';
+  html+='</tr></thead><tbody>';
+  mostrar.forEach(function(x){
+    html+='<tr><td style="background:#f7f9fc;border:1px solid #e8ecf3;padding:2px 6px;color:#999;text-align:right">'+x.n+'</td>';
+    for(var c=0;c<cols;c++) html+='<td style="border:1px solid #e8ecf3;padding:2px 8px;white-space:nowrap">'+_escU(x.f[c]===undefined?'':x.f[c])+'</td>';
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  document.getElementById('ar-tabla').innerHTML=total?html:'<div style="padding:16px;color:#999;font-size:13px">'+(q?'Sin resultados.':'La hoja está vacía.')+'</div>';
+  document.getElementById('ar-info').textContent=total+' fila'+(total===1?'':'s')+(total>MAXF?' (se muestran las primeras '+MAXF+'; descargá el archivo para verlo completo)':'')+(ab.filas.some(function(f){return f.length>MAXC;})?' · se muestran las primeras '+MAXC+' columnas':'')+' · solo lectura';
+}
+function archDescargarAbierto(){ if(_archAb) archDescargar(_archAb.id); }
+
+// ===================================================
 // PERMISOS: funciones exclusivas del administrador
 // (la pantalla oculta los botones; esto bloquea tambien cualquier llamada directa)
 // ===================================================
@@ -5236,7 +5438,7 @@ setInterval(presPintar,60000);
  'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
  'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
  'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs',
- 'tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
+ 'archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
 ].forEach(function(n){
   var f=window[n];
   if(typeof f!=='function') return;
