@@ -1068,7 +1068,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.24.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.25.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -5379,17 +5379,40 @@ async function archDescargar(id){
     l.href=URL.createObjectURL(b); l.download=a.nombre; document.body.appendChild(l); l.click(); l.remove(); setTimeout(function(){ URL.revokeObjectURL(l.href); },4000);
   }catch(err){ alert('No se pudo descargar: '+(err.message||err)); }
 }
-var _archAb=null; // {id, nombre, wb, hoja, filas}
+var _archAb=null; // {id, nombre, modo:'x'|'s', wb, hoja, filas}
+var _exceljsP=null;
+function _cargarExcelJS(){
+  if(window.ExcelJS) return Promise.resolve();
+  if(_exceljsP) return _exceljsP;
+  _exceljsP=new Promise(function(res,rej){
+    var s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    s.onload=function(){ res(); }; s.onerror=function(){ _exceljsP=null; rej(new Error('No se pudo cargar el lector de formato.')); };
+    document.head.appendChild(s);
+  });
+  return _exceljsP;
+}
 async function archAbrir(id){
   var a=(window._archivos||[]).find(function(x){return x.id===id;}); if(!a) return;
-  if(typeof XLSX==='undefined'){ alert('No se pudo cargar el lector de Excel. Revisá tu conexión y recargá.'); return; }
   try{
     _toast('Abriendo '+a.nombre+'…');
     var u8=await window.archLeer(id,a.n||1);
-    var wb=XLSX.read(u8,{type:'array',cellDates:true});
-    _archAb={id:id,nombre:a.nombre,wb:wb,hoja:0,filas:[]};
     document.getElementById('ar-tit').textContent=a.nombre;
     document.getElementById('ar-q').value='';
+    _archAb=null;
+    if(/\.(xlsx|xlsm)$/i.test(a.nombre)){
+      try{
+        await _cargarExcelJS();
+        var wbx=new ExcelJS.Workbook();
+        await wbx.xlsx.load(u8.buffer.slice(u8.byteOffset,u8.byteOffset+u8.byteLength));
+        _archAb={id:id,nombre:a.nombre,modo:'x',wb:wbx,hoja:0,filas:[]};
+      }catch(err){ console.warn('visor con formato no disponible, se muestra solo datos:',err); _archAb=null; }
+    }
+    if(!_archAb){
+      if(typeof XLSX==='undefined'){ alert('No se pudo cargar el lector de Excel. Revisá tu conexión y recargá.'); return; }
+      var wb=XLSX.read(u8,{type:'array',cellDates:true});
+      _archAb={id:id,nombre:a.nombre,modo:'s',wb:wb,hoja:0,filas:[]};
+    }
     document.getElementById('modalArch').classList.add('open');
     archHoja(0);
   }catch(err){ alert('No se pudo abrir el archivo: '+(err.message||err)); }
@@ -5397,17 +5420,20 @@ async function archAbrir(id){
 function archHoja(k){
   var ab=_archAb; if(!ab) return;
   ab.hoja=k;
-  var nombres=ab.wb.SheetNames;
+  var nombres=ab.modo==='x'?ab.wb.worksheets.map(function(w){return w.name;}):ab.wb.SheetNames;
   document.getElementById('ar-hojas').innerHTML=nombres.map(function(n,i){
     return '<button class="btn btn-sm '+(i===k?'btn-dark':'btn-outline')+'" data-k="'+i+'" onclick="archHoja(parseInt(this.dataset.k,10))">'+_escU(n)+'</button>';
   }).join('');
+  if(ab.modo==='x'){ _archDibujarX(ab.wb.worksheets[k]); return; }
   var ws=ab.wb.Sheets[nombres[k]];
   ab.filas=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
   archFiltrar();
 }
 function archFiltrar(){
   var ab=_archAb; if(!ab) return;
-  var q=(document.getElementById('ar-q').value||'').trim().toLowerCase(), MAXF=1500, MAXC=60;
+  var q=(document.getElementById('ar-q').value||'').trim().toLowerCase();
+  if(ab.modo==='x'){ _archFiltrarX(q); return; }
+  var MAXF=1500, MAXC=60;
   var filas=ab.filas.map(function(f,i){ return {n:i+1,f:f}; });
   if(q) filas=filas.filter(function(x){ return x.f.some(function(c){ return String(c).toLowerCase().indexOf(q)>=0; }); });
   var total=filas.length, mostrar=filas.slice(0,MAXF);
@@ -5422,9 +5448,227 @@ function archFiltrar(){
   });
   html+='</tbody></table>';
   document.getElementById('ar-tabla').innerHTML=total?html:'<div style="padding:16px;color:#999;font-size:13px">'+(q?'Sin resultados.':'La hoja está vacía.')+'</div>';
-  document.getElementById('ar-info').textContent=total+' fila'+(total===1?'':'s')+(total>MAXF?' (se muestran las primeras '+MAXF+'; descargá el archivo para verlo completo)':'')+(ab.filas.some(function(f){return f.length>MAXC;})?' · se muestran las primeras '+MAXC+' columnas':'')+' · solo lectura';
+  document.getElementById('ar-info').textContent=total+' fila'+(total===1?'':'s')+(total>MAXF?' (se muestran las primeras '+MAXF+'; descargá el archivo para verlo completo)':'')+(ab.filas.some(function(f){return f.length>MAXC;})?' · se muestran las primeras '+MAXC+' columnas':'')+' · solo lectura (sin formato)';
 }
 function archDescargarAbierto(){ if(_archAb) archDescargar(_archAb.id); }
+
+// ----- Visor con formato (colores, bordes, anchos, celdas combinadas y formato condicional) -----
+var _XTEMA=['FFFFFF','000000','EEECE1','1F497D','4F81BD','C0504D','9BBB59','8064A2','4BACC6','F79646'];
+function _xColor(c){
+  if(!c) return null;
+  if(c.argb){ var a=String(c.argb); return '#'+(a.length===8?a.slice(2):a); }
+  if(c.theme!==undefined){
+    var hex=_XTEMA[c.theme]||'000000', t=c.tint||0;
+    var rgb=[0,2,4].map(function(i){ return parseInt(hex.substr(i,2),16); }).map(function(v){ return Math.max(0,Math.min(255,Math.round(t<0?v*(1+t):v+(255-v)*t))); });
+    return '#'+rgb.map(function(v){ return ('0'+v.toString(16)).slice(-2); }).join('');
+  }
+  if(c.indexed!==undefined){ var ix={0:'#000000',1:'#FFFFFF',2:'#FF0000',3:'#00FF00',4:'#0000FF',5:'#FFFF00',6:'#FF00FF',7:'#00FFFF',8:'#000000',9:'#FFFFFF',10:'#FF0000',13:'#FFFF00',64:null}; return ix[c.indexed]||null; }
+  return null;
+}
+function _xBorde(b){
+  if(!b||!b.style) return '';
+  var w={hair:1,thin:1,dotted:1,dashed:1,medium:2,mediumDashed:2,thick:3,double:3}[b.style]||1;
+  var st=(b.style==='dashed'||b.style==='mediumDashed')?'dashed':(b.style==='dotted'||b.style==='hair')?'dotted':(b.style==='double'?'double':'solid');
+  return w+'px '+st+' '+(_xColor(b.color)||'#000');
+}
+// Valor de celda para evaluar reglas (numero, texto, booleano o vacio)
+function _xValor(cell){
+  if(!cell) return '';
+  var v=cell.value;
+  if(v===null||v===undefined) return '';
+  if(typeof v==='object' && !(v instanceof Date)){
+    if(v.result!==undefined) v=v.result;
+    else if(v.richText) v=v.richText.map(function(r){return r.text;}).join('');
+    else if(v.text!==undefined) v=v.text;
+    else if(v.error) return '';
+  }
+  if(v instanceof Date) return Math.round(v.getTime()/864e5)+25569;
+  if(v===null||v===undefined) return '';
+  return v;
+}
+function _xCol(s){ var n=0; for(var i=0;i<s.length;i++) n=n*26+(s.charCodeAt(i)-64); return n; }
+function _xRef(s){ var m=/^([A-Z]+)(\d+)$/.exec(s); return m?{c:_xCol(m[1]),r:parseInt(m[2],10)}:null; }
+var _XF={
+  AND:function(){ return Array.prototype.every.call(arguments,function(x){return !!x;}); },
+  OR:function(){ return Array.prototype.some.call(arguments,function(x){return !!x;}); },
+  NOT:function(x){ return !x; }, IF:function(a,b,c){ return a?b:(c===undefined?false:c); },
+  ISBLANK:function(x){ return x===''; }, ISNUMBER:function(x){ return typeof x==='number'; }, ISTEXT:function(x){ return typeof x==='string'&&x!==''; },
+  ISERROR:function(x){ return typeof x==='string' && /^#[A-Z\/0!?]+$/.test(x); },
+  SEARCH:function(buscar,en,ini){
+    var pat=String(buscar).replace(/[.+^${}()|[\]\\]/g,'\\$&').replace(/~\*/g,'\u0001').replace(/~\?/g,'\u0002').replace(/\*/g,'.*').replace(/\?/g,'.').replace(/\u0001/g,'\\*').replace(/\u0002/g,'\\?');
+    var s=String(en), i=(ini||1)-1, m=new RegExp(pat,'i').exec(s.slice(i));
+    return m?m.index+i+1:'#VALUE!';
+  },
+  FIND:function(buscar,en,ini){ var i=String(en).indexOf(String(buscar),(ini||1)-1); return i>=0?i+1:'#VALUE!'; }, ABS:Math.abs, LEN:function(x){ return String(x).length; },
+  TODAY:function(){ return Math.floor(Date.now()/864e5)+25569-0; }, NOW:function(){ return Date.now()/864e5+25569; },
+  MOD:function(a,b){ return a-b*Math.floor(a/b); }, ROUND:function(a,n){ var f=Math.pow(10,n||0); return Math.round(a*f)/f; },
+  MAX:Math.max, MIN:Math.min, SUM:function(){ return Array.prototype.reduce.call(arguments,function(s,x){return s+(parseFloat(x)||0);},0); },
+  TRIM:function(x){ return String(x).trim(); }, UPPER:function(x){ return String(x).toUpperCase(); }, LOWER:function(x){ return String(x).toLowerCase(); },
+  LEFT:function(x,n){ return String(x).slice(0,n===undefined?1:n); }, RIGHT:function(x,n){ n=n===undefined?1:n; return n?String(x).slice(-n):''; },
+  DAY:function(s){ return new Date((s-25569)*864e5).getUTCDate(); }, MONTH:function(s){ return new Date((s-25569)*864e5).getUTCMonth()+1; }, YEAR:function(s){ return new Date((s-25569)*864e5).getUTCFullYear(); }
+};
+// Convierte una formula de Excel (solo lo conocido) en una funcion (fila,col)->valor. Devuelve null si no se puede (la regla se ignora).
+// Seguridad: el codigo JS se arma solo con piezas generadas aca (nunca se copia texto del archivo).
+function _xCompilar(formula,base){
+  var s=String(formula||'').replace(/^=/,''), i=0, out='', m;
+  while(i<s.length){
+    var rest=s.slice(i);
+    if((m=/^\s+/.exec(rest))){ i+=m[0].length; continue; }
+    if((m=/^"((?:[^"]|"")*)"/.exec(rest))){ out+=JSON.stringify(m[1].replace(/""/g,'"')); i+=m[0].length; continue; }
+    if((m=/^(\d+(?:\.\d+)?)(%?)/.exec(rest))){ out+=(m[2]?'('+parseFloat(m[1])+'/100)':String(parseFloat(m[1]))); i+=m[0].length; continue; }
+    if((m=/^(TRUE|FALSE)\b(?!\()/i.exec(rest))){ out+=m[1].toLowerCase(); i+=m[0].length; continue; }
+    if((m=/^([A-Z][A-Z0-9.]*)\(/i.exec(rest))){
+      var fn=m[1].toUpperCase().replace(/\./g,'_');
+      if(!Object.prototype.hasOwnProperty.call(_XF,fn)) return null;
+      out+='F.'+fn+'('; i+=m[0].length; continue;
+    }
+    if((m=/^(\$?)([A-Z]{1,3})(\$?)(\d+)(?![\dA-Z(:!])/.exec(rest))){
+      var col=_xCol(m[2]), row=parseInt(m[4],10);
+      out+='V('+(m[3]?row:'R+'+(row-base.r))+','+(m[1]?col:'C+'+(col-base.c))+')';
+      i+=m[0].length; continue;
+    }
+    if((m=/^(<=|>=|<>|<|>|=|\+|-|\*|\/|\^|&|\(|\)|,)/.exec(rest))){
+      var op=m[1]; out+=({'=':'==','<>':'!=','^':'**','&':'+""+',',':','})[op]||op;
+      i+=op.length; continue;
+    }
+    return null;
+  }
+  try{ return new Function('V','F','R','C','return ('+out+');'); }catch(e){ return null; }
+}
+function _xReglas(ws,V){
+  // devuelve lista de {celdas:[{r1,c1,r2,c2}], reglas:[{test(r,c), estilo}]} ya compiladas
+  var lista=[], noSoportadas=0;
+  (ws.conditionalFormattings||[]).forEach(function(cf){
+    var rangos=String(cf.ref||'').split(/\s+/).map(function(rg){ var p=rg.split(':'), a=_xRef(p[0]), b=_xRef(p[1]||p[0]); return (a&&b)?{r1:a.r,c1:a.c,r2:b.r,c2:b.c}:null; }).filter(Boolean);
+    if(!rangos.length) return;
+    var base={r:rangos[0].r1,c:rangos[0].c1}, reglas=[];
+    (cf.rules||[]).slice().sort(function(a,b){ return (a.priority||0)-(b.priority||0); }).forEach(function(rl){
+      var test=null, f=rl.formulae||[];
+      if(/#REF!/.test(String(f[0]||''))) return; // regla con referencia rota: Excel tampoco la aplica
+      if(rl.type==='expression'){ var fx=_xCompilar(f[0],base); if(fx) test=function(r,c){ try{ return !!fx(V,_XF,r,c); }catch(e){ return false; } }; }
+      else if(rl.type==='cellIs'){
+        var fx2=_xCompilar(f[0],base), op=rl.operator;
+        if(fx2) test=function(r,c){ try{ var v=V(r,c), x=fx2(V,_XF,r,c);
+          return ({lessThan:v<x,lessThanOrEqual:v<=x,greaterThan:v>x,greaterThanOrEqual:v>=x,equal:v==x,notEqual:v!=x})[op]===true; }catch(e){ return false; } };
+      } else if(rl.type==='containsText' && rl.text!==undefined){
+        var tx=String(rl.text).toLowerCase(); test=function(r,c){ return String(V(r,c)).toLowerCase().indexOf(tx)>=0; };
+      } else if(rl.type==='containsBlanks'){ test=function(r,c){ return V(r,c)===''; }; }
+      else if(rl.type==='notContainsBlanks'){ test=function(r,c){ return V(r,c)!==''; }; }
+      if(!test){ noSoportadas++; return; }
+      reglas.push({test:test,estilo:rl.style||{}});
+    });
+    if(reglas.length) lista.push({rangos:rangos,reglas:reglas});
+  });
+  return {lista:lista,noSoportadas:noSoportadas};
+}
+function _xEstiloCF(est){
+  var css='';
+  var f=est.fill;
+  if(f && f.pattern!=='none'){ var col=_xColor(f.bgColor)||_xColor(f.fgColor); if(col) css+='background:'+col+';'; }
+  var ft=est.font;
+  if(ft){ var fc=_xColor(ft.color); if(fc) css+='color:'+fc+';'; if(ft.bold) css+='font-weight:bold;'; if(ft.italic) css+='font-style:italic;'; if(ft.strike) css+='text-decoration:line-through;'; }
+  return css;
+}
+// Texto que muestra Excel para una celda segun su formato de numero (importes, fechas, porcentajes)
+function _xTexto(cell){
+  var v=cell.value;
+  if(v&&typeof v==='object'&&!(v instanceof Date)&&v.result!==undefined) v=v.result;
+  var fmt=cell.numFmt||'General';
+  if(v instanceof Date){
+    var p=function(n){ return ('0'+n).slice(-2); };
+    var d=v.getUTCDate(), mo=v.getUTCMonth()+1, y=v.getUTCFullYear();
+    var f=String(fmt), s=/^(\[\$-\w+\])?m+\/d+\/y+/i.test(f)?(mo+'/'+d+'/'+y):(p(d)+'/'+p(mo)+'/'+y);
+    if(/h/i.test(f.replace(/\[[^\]]*\]/g,''))) s+=' '+p(v.getUTCHours())+':'+p(v.getUTCMinutes());
+    return {t:s};
+  }
+  if(typeof v==='number' && fmt!=='General'){
+    var secs=String(fmt).split(';'), neg=v<0&&secs.length>1, sec=neg?secs[1]:secs[0];
+    var rojo=/\[RED\]/i.test(sec);
+    sec=sec.replace(/\[[^\]]*\]/g,'');
+    var m=/(#,##0|0)(\.0+)?(%?)/.exec(sec);
+    if(m){
+      var dec=m[2]?m[2].length-1:0, num=(neg?-v:v)*(m[3]?100:1);
+      var pre=sec.slice(0,m.index).replace(/"/g,'').replace(/\\/g,''), suf=sec.slice(m.index+m[0].length).replace(/"/g,'').replace(/\\/g,'').replace(/_.|@|\*./g,'');
+      var txt=num.toLocaleString('es-AR',{minimumFractionDigits:dec,maximumFractionDigits:dec,useGrouping:m[1]==='#,##0'});
+      return {t:pre+((neg&&secs.length<2)?'-':'')+txt+(m[3]?'%':'')+suf,rojo:rojo};
+    }
+  }
+  var tx; try{ tx=cell.text; }catch(e){ tx=String(v===undefined||v===null?'':v); }
+  return {t:tx};
+}
+var _xMeta=null;
+function _archDibujarX(ws){
+  var cont=document.getElementById('ar-tabla'), info=document.getElementById('ar-info');
+  if(!ws){ cont.innerHTML=''; return; }
+  var MAXF=3000, MAXC=60;
+  var nf=Math.min(ws.rowCount||0,MAXF), nc=Math.min(ws.columnCount||0,MAXC);
+  if(!nf||!nc){ cont.innerHTML='<div style="padding:16px;color:#999;font-size:13px">La hoja está vacía.</div>'; info.textContent=''; _xMeta=null; return; }
+  var V=function(r,c){ return _xValor(ws.findCell(r,c)); };
+  var cf=_xReglas(ws,V);
+  // celdas combinadas
+  var mer={}, tapadas={};
+  ((ws.model&&ws.model.merges)||[]).forEach(function(rg){
+    var p=String(rg).split(':'), a=_xRef(p[0]), b=_xRef(p[1]||p[0]); if(!a||!b) return;
+    mer[a.r+','+a.c]={rs:b.r-a.r+1,cs:b.c-a.c+1};
+    for(var r=a.r;r<=b.r;r++) for(var c=a.c;c<=b.c;c++) if(r!==a.r||c!==a.c) tapadas[r+','+c]=1;
+  });
+  var rejilla=!(ws.views&&ws.views[0]&&ws.views[0].showGridLines===false);
+  var anchos=[]; for(var c=1;c<=nc;c++){ var col=ws.getColumn(c); anchos[c]=col.hidden?0:Math.round((col.width||8.43)*7+5); }
+  var html='<table style="border-collapse:collapse;table-layout:fixed;font-family:Calibri,Arial,sans-serif;font-size:14.6px"><colgroup><col style="width:40px">';
+  for(c=1;c<=nc;c++) html+='<col style="width:'+anchos[c]+'px'+(anchos[c]?'':';visibility:collapse')+'">';
+  html+='</colgroup><thead><tr><th style="position:sticky;top:0;z-index:3;background:#e6eaf1;border:1px solid #cfd6e2;height:20px"></th>';
+  for(c=1;c<=nc;c++) html+='<th style="position:sticky;top:0;z-index:3;background:#e6eaf1;border:1px solid #cfd6e2;color:#47556b;font-weight:600;font-size:11px">'+XLSX.utils.encode_col(c-1)+'</th>';
+  html+='</tr></thead><tbody>';
+  var aplicadas=0;
+  for(var r=1;r<=nf;r++){
+    var row=ws.findRow?ws.findRow(r):ws.getRow(r);
+    if(row&&row.hidden) continue;
+    var alto=row&&row.height?Math.round(row.height*1.333):20, textoFila=[];
+    var tds='';
+    for(c=1;c<=nc;c++){
+      if(tapadas[r+','+c]||!anchos[c]) continue;
+      var cell=ws.findCell(r,c), css='', txt='';
+      if(cell){
+        var tf=_xTexto(cell); txt=tf.t; if(tf.rojo) css+='color:#d00000;';
+        var fl=cell.fill; if(fl&&fl.type==='pattern'&&fl.pattern==='solid'){ var bg=_xColor(fl.fgColor); if(bg) css+='background:'+bg+';'; }
+        var fo=cell.font||{}; var fc=_xColor(fo.color); if(fc) css+='color:'+fc+';';
+        if(fo.bold) css+='font-weight:bold;'; if(fo.italic) css+='font-style:italic;'; if(fo.underline) css+='text-decoration:underline;'; if(fo.strike) css+='text-decoration:line-through;';
+        if(fo.size) css+='font-size:'+Math.round(fo.size*1.333*10)/10+'px;';
+        var al=cell.alignment||{};
+        if(al.horizontal) css+='text-align:'+({centerContinuous:'center',fill:'left',justify:'left',distributed:'center'}[al.horizontal]||al.horizontal)+';';
+        else if(typeof _xValor(cell)==='number') css+='text-align:right;';
+        css+='vertical-align:'+({top:'top',middle:'middle',center:'middle'}[al.vertical]||'bottom')+';';
+        css+=al.wrapText?'white-space:pre-wrap;word-break:break-word;':'white-space:nowrap;overflow:hidden;';
+        var bd=cell.border||{}, hay=false;
+        ['top','right','bottom','left'].forEach(function(l){ var b=_xBorde(bd[l]); if(b){ css+='border-'+l+':'+b+';'; hay=true; } });
+        if(!hay&&rejilla) css+='border:1px solid #e3e7ee;';
+      } else if(rejilla) css+='border:1px solid #e3e7ee;';
+      // formato condicional
+      cf.lista.forEach(function(g){
+        var dentro=g.rangos.some(function(rg){ return r>=rg.r1&&r<=rg.r2&&c>=rg.c1&&c<=rg.c2; });
+        if(!dentro) return;
+        var extra='';
+        for(var k=g.reglas.length-1;k>=0;k--){ if(g.reglas[k].test(r,c)){ extra+=_xEstiloCF(g.reglas[k].estilo); aplicadas++; } }
+        if(extra) css+=extra;
+      });
+      var mg=mer[r+','+c], at=mg?' rowspan="'+mg.rs+'" colspan="'+mg.cs+'"':'';
+      textoFila.push(txt);
+      tds+='<td'+at+' style="'+css+'padding:0 3px;max-width:'+(anchos[c]*(mg?mg.cs:1))+'px">'+_escU(txt)+'</td>';
+    }
+    html+='<tr data-t="'+_escU(textoFila.join(' ').toLowerCase())+'" style="height:'+alto+'px"><td style="position:sticky;left:0;background:#e6eaf1;border:1px solid #cfd6e2;color:#47556b;font-size:11px;text-align:center">'+r+'</td>'+tds+'</tr>';
+  }
+  html+='</tbody></table>';
+  cont.innerHTML=html;
+  _xMeta={filas:nf,aplicadas:aplicadas,noSoportadas:cf.noSoportadas,recorte:(ws.rowCount>MAXF||ws.columnCount>MAXC)};
+  _archFiltrarX((document.getElementById('ar-q').value||'').trim().toLowerCase());
+}
+function _archFiltrarX(q){
+  var trs=document.querySelectorAll('#ar-tabla tbody tr'), vis=0;
+  Array.prototype.forEach.call(trs,function(tr){ var ok=!q||tr.getAttribute('data-t').indexOf(q)>=0; tr.style.display=ok?'':'none'; if(ok) vis++; });
+  var m=_xMeta||{};
+  document.getElementById('ar-info').textContent=vis+' fila'+(vis===1?'':'s')+(q?' con "'+q+'"':'')+(m.recorte?' (se muestran las primeras 3.000 filas y 60 columnas; descargá el archivo para verlo completo)':'')+
+    ' · solo lectura'+(m.noSoportadas?' · '+m.noSoportadas+' regla(s) de formato condicional no se pueden mostrar aquí':'');
+}
 
 // ===================================================
 // PERMISOS: funciones exclusivas del administrador
