@@ -742,6 +742,27 @@ window.archBorrar = async function(id, n){
   delete window._archCache[id];
 };
 
+// -- PROMESAS DE PAGO: un documento por mes ("promesas/AAAA-MM") con todas las promesas en el mapa "r" --
+window.promesasEscuchar = function(mes, cb){
+  window.promesasDetener();
+  window._pmUnsub = onSnapshot(doc(db_fs,'promesas',mes), function(sn){
+    const r = (sn.exists() && sn.data().r) || {};
+    cb(Object.keys(r).map(function(k){ return Object.assign({id:k}, r[k]); }).filter(function(x){ return !x.x; }));
+  }, function(e){ cb(null, e); });
+};
+window.promesasDetener = function(){ if(window._pmUnsub){ try{window._pmUnsub();}catch(e){} window._pmUnsub=null; } };
+window.promesasGuardar = async function(mes, id, obj){
+  await setDoc(doc(db_fs,'promesas',mes), { r: { [id]: obj } }, { merge: true });
+};
+window.promesasGuardarMuchas = async function(mes, mapa){
+  await setDoc(doc(db_fs,'promesas',mes), { r: mapa }, { merge: true });
+};
+window.promesasTodos = async function(){
+  const sn = await getDocs(collection(db_fs,'promesas')), o = {};
+  sn.forEach(function(d){ const r=d.data().r||{}; o[d.id]=Object.keys(r).map(function(k){ return Object.assign({id:k}, r[k]); }).filter(function(x){ return !x.x; }); });
+  return o;
+};
+
 // -- AUTH STATE --
 onAuthStateChanged(auth, async function(user){
   if(user){
@@ -792,6 +813,7 @@ onAuthStateChanged(auth, async function(user){
     if(window.chatDetener) window.chatDetener();
     if(window.presenciaDetener) window.presenciaDetener(false);
     if(window.archDetener) window.archDetener();
+    if(window.promesasDetener) window.promesasDetener();
     if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} window._unsubPlant=null; }
     window._plantDoc=null;
     window._ROL='usuario';
@@ -1068,13 +1090,14 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.25.1</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.26.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
   <div class="modnav" style="margin-left:12px">
     <div class="mb active" onclick="setMod('admin',this)">Administraci&#243;n</div>
     <div class="mb" onclick="setMod('consultas',this)">Consultas</div>
+    <div class="mb" onclick="setMod('promesas',this)">&#129309; Promesas</div>
     <div class="mb" onclick="setMod('archivos',this)">&#128193; Archivos</div>
     <div class="mb solo-admin" onclick="setMod('herramientas',this)">Herramientas</div>
   </div>
@@ -1253,6 +1276,42 @@ body.rol-usuario .solo-admin{display:none!important}
   <div id="ar-info" style="font-size:11px;color:#888;margin-bottom:4px"></div>
   <div id="ar-tabla" style="overflow:auto;flex:1;min-height:200px;border:1px solid #e1e6ef;border-radius:8px"></div>
 </div></div>
+<div class="modal-overlay" id="modalPm"><div class="modal" style="max-width:600px">
+  <h3 id="pm-tit">Nueva promesa de pago</h3>
+  <input type="hidden" id="pm-id"><input type="hidden" id="pm-mes">
+  <div class="g2" style="margin-bottom:8px">
+    <div class="fld"><label>DNI</label><input id="pm-dni" onblur="pmDniBlur()" autocomplete="off"></div>
+    <div class="fld"><label>Nombre</label><input id="pm-nombre" placeholder="APELLIDO,NOMBRE"></div>
+    <div class="fld"><label>Tel&#233;fono</label><input id="pm-tel"></div>
+    <div class="fld"><label>Financiera / entidad</label><input id="pm-fin" list="pm-fin-l"><datalist id="pm-fin-l"></datalist></div>
+    <div class="fld"><label>Monto a abonar ($)</label><input id="pm-monto" type="number" min="0" step="100"></div>
+    <div class="fld"><label>Fecha prometida</label><input id="pm-fecha" type="date"></div>
+    <div class="fld"><label>Plan</label><input id="pm-plan" list="pm-plan-l" placeholder="ANTICIPO, CUOTA 1 DE 6, CANCELACION"><datalist id="pm-plan-l"><option value="ANTICIPO"><option value="CANCELACION"><option value="CUOTA 1 DE 3"><option value="CUOTA 1 DE 6"><option value="CUOTA 1 DE 9"><option value="CUOTA 1 DE 12"></datalist></div>
+    <div class="fld"><label>Lugar de pago</label><select id="pm-lugar"><option>BANCO</option><option>LOCAL</option><option>RAPIPAGO</option><option>LOCAL O BANCO</option></select></div>
+    <div class="fld"><label>Tipo</label><select id="pm-tp"><option value="PP">PP</option><option value="SP">SP</option></select></div>
+    <div class="fld"><label>Unidad de negocio</label><input id="pm-ng" placeholder="ARGENMAX"></div>
+    <div class="fld"><label>Monto original ($, opcional)</label><input id="pm-mo" type="number" min="0" step="100"></div>
+    <div class="fld"><label>Punitorios ($, opcional)</label><input id="pm-pu" type="number" min="0" step="100"></div>
+  </div>
+  <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:8px 0"><input type="checkbox" id="pm-reg" checked> Registrar un tr&#225;mite en la ficha del cliente (si existe en el sistema)</label>
+  <div id="pm-msg" style="font-size:12px;color:#c0392b;min-height:16px"></div>
+  <div class="btn-row"><button class="btn btn-dark" onclick="pmGuardar()">Guardar promesa</button><button class="btn btn-outline" onclick="cerrarModal('modalPm')">Cancelar</button></div>
+</div></div>
+<div class="modal-overlay" id="modalPmPago"><div class="modal" style="max-width:420px">
+  <h3 id="pp-tit">Registrar pago</h3>
+  <input type="hidden" id="pp-id">
+  <div class="g2" style="margin-bottom:8px">
+    <div class="fld"><label>Monto cobrado ($)</label><input id="pp-monto" type="number" min="0" step="100"></div>
+    <div class="fld"><label>Fecha del pago</label><input id="pp-fecha" type="date"></div>
+  </div>
+  <div style="font-size:11px;color:#888;margin-bottom:8px">Si cobraste menos que lo prometido, queda como pago parcial.</div>
+  <div class="btn-row"><button class="btn btn-dark" onclick="pmPagoGuardar()">Guardar pago</button><button class="btn btn-outline" onclick="cerrarModal('modalPmPago')">Cancelar</button></div>
+</div></div>
+<div class="modal-overlay" id="modalPmImp"><div class="modal" style="max-width:640px">
+  <h3>Importar seguimiento desde Excel</h3>
+  <div id="pmi-cuerpo" style="font-size:13px"></div>
+  <div class="btn-row"><button class="btn btn-dark" id="pmi-ok" onclick="pmImportarConfirmar()">Importar</button><button class="btn btn-outline" onclick="cerrarModal('modalPmImp')">Cerrar</button></div>
+</div></div>
 <div class="modal-overlay" id="modalAlcance"><div class="modal" style="max-width:520px">
   <h3 id="alc-tit">Alcance en Avanzadas</h3>
   <div style="font-size:12px;color:#666;margin-bottom:10px;line-height:1.5">Define qu&#233; entidades y carteras puede ver este usuario en el filtro <strong>Avanzadas</strong>. No cambia la b&#250;squeda de un cliente. Si marc&#225;s entidades y carteras, ve lo que cumpla ambas.</div>
@@ -1374,6 +1433,8 @@ function setMod(mod, el){
   else if(mod==='consultas') renderConsultas();
   else if(mod==='herramientas') renderHerramientas();
   else if(mod==='archivos') renderArchivos();
+  else if(mod==='promesas') renderPromesas();
+  if(mod!=='promesas' && window.promesasDetener) window.promesasDetener();
 }
 
 // ===================================================
@@ -1845,7 +1906,7 @@ function renderDatos(){
   return `
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <h2 style="font-size:16px">${c.nombre||'Sin nombre'}${c.nombre?_btnCopiar(c.nombre,'nombre'):''} <span class="badge ${ {'Pendiente':'bp','En acuerdo':'ba','Cancelado':'bc','Sin contacto':'bs'}[c.estado]||'bp'}" style="font-size:11px;padding:3px 9px">${c.estado||'Pendiente'}</span></h2>
-    <div style="display:flex;gap:6px"><button class="btn btn-green btn-sm" onclick="abrirMensaje()">&#128172; Mensaje</button><button class="btn btn-outline btn-sm solo-admin" onclick="abrirEditarCliente('${c.id}')">✏️ Editar</button></div>
+    <div style="display:flex;gap:6px"><button class="btn btn-green btn-sm" onclick="abrirMensaje()">&#128172; Mensaje</button><button class="btn btn-outline btn-sm" onclick="pmNueva(true)" title="Registrar una promesa de pago de este cliente">&#129309; Promesa</button><button class="btn btn-outline btn-sm solo-admin" onclick="abrirEditarCliente('${c.id}')">✏️ Editar</button></div>
   </div>
   <div class="card">
     <div class="card-title" style="margin-bottom:10px">Datos personales</div>
@@ -4098,6 +4159,9 @@ const REGLAS_FIRESTORE = [
 "      allow read: if habilitado();",
 "      allow write: if esAdmin();",
 "    }",
+"    match /promesas/{id} {",
+"      allow read, write: if habilitado();",
+"    }",
 "    match /archivos/{id} {",
 "      allow read: if esAdmin() || (habilitado() && resource.data.usuarios == true);",
 "      allow write: if esAdmin();",
@@ -5671,6 +5735,389 @@ function _archFiltrarX(q){
 }
 
 // ===================================================
+// PROMESAS DE PAGO (seguimiento mensual)
+// ===================================================
+var _pm={mes:'',rows:[],vista:'mes',fEst:'',fFin:'',q:'',hist:null,err:''};
+var _PM_MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function _pmHoy(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+function _pmMesNombre(k){ var p=String(k).split('-'); return (_PM_MESES[parseInt(p[1],10)-1]||k)+' '+p[0]; }
+function _pmNum(v){
+  if(typeof v==='number') return isFinite(v)?v:0;
+  var s=String(v==null?'':v).replace(/[^\d.,-]/g,''); if(!s) return 0;
+  var c=s.lastIndexOf(','), p=s.lastIndexOf('.');
+  if(c>=0&&p>=0){ s=(c>p)?s.replace(/\./g,'').replace(',','.'):s.replace(/,/g,''); }
+  else if(c>=0){ s=/,\d{1,2}$/.test(s)?s.replace(',','.'):s.replace(/,/g,''); }
+  else if(p>=0 && /\.\d{3}$/.test(s)) s=s.replace(/\./g,'');
+  var n=parseFloat(s); return isNaN(n)?0:n;
+}
+function _pmHash(s){ var h=5381; for(var i=0;i<s.length;i++) h=((h<<5)+h+s.charCodeAt(i))|0; return (h>>>0).toString(36); }
+function _pmId(r){ return 'p'+_pmHash([String(r.d||'').replace(/\D/g,''),r.f||'',r.pl||'',Math.round(r.m||0)].join('|')); }
+function _pmEstado(r){
+  var hoy=_pmHoy();
+  if((r.pg||0)>0) return (r.pg>=(r.m||0)-0.5)?'cobrada':'parcial';
+  if((r.cd||0)>0) return 'caida';
+  if(r.f && r.f<hoy) return 'vencida';
+  if(r.f===hoy) return 'hoy';
+  return 'pendiente';
+}
+var _PM_EST={cobrada:['Cobrada','#1a7a3d','#e3f4e8'],parcial:['Parcial','#8a6100','#fff3d1'],caida:['Caída','#b3261e','#fde7e5'],vencida:['Vencida sin pago','#b45309','#ffedd5'],hoy:['Vence hoy','#1d4ed8','#dbeafe'],pendiente:['Pendiente','#47556b','#eef3fa']};
+function _pmResumen(rows){
+  var R={n:rows.length,proy:0,cobr:0,caido:0,pend:0,nCobr:0,nCaido:0,nPend:0,porFin:{}};
+  rows.forEach(function(r){
+    var m=r.m||0, pg=r.pg||0, cd=r.cd||0, e=_pmEstado(r), f=r.fi||'SIN FINANCIERA';
+    var F=R.porFin[f]||(R.porFin[f]={n:0,proy:0,cobr:0,caido:0}); F.n++; F.proy+=m; F.cobr+=pg; F.caido+=cd;
+    R.proy+=m; R.cobr+=pg; R.caido+=cd;
+    if(pg>0) R.nCobr++; if(cd>0&&pg===0) R.nCaido++;
+    if(e==='pendiente'||e==='vencida'||e==='hoy'){ R.pend+=m; R.nPend++; }
+    else if(e==='parcial'){ R.pend+=Math.max(0,m-pg); R.nPend++; }
+  });
+  return R;
+}
+var _pmCliIdx=null, _pmCliSrc=null;
+function _pmCliente(dni){
+  var d=String(dni||'').replace(/\D/g,''); if(!d) return null;
+  var src=window._todosClientesCache||DB.clientes;
+  if(_pmCliSrc!==src||!_pmCliIdx){ _pmCliIdx={}; src.forEach(function(c){ var k=String(c.dni||'').replace(/\D/g,''); if(k&&!_pmCliIdx[k]) _pmCliIdx[k]=c; }); _pmCliSrc=src; }
+  return _pmCliIdx[d]||null;
+}
+function _pmNombreBonito(n){
+  var s=String(n||'').trim(); if(!s) return '';
+  if(s.indexOf(',')>=0){ var p=s.split(','); s=p.slice(1).join(' ').trim()+' '+p[0].trim(); }
+  return _tituloNombre(s);
+}
+// Agrega un tramite automatico en la ficha del cliente (si el DNI existe en el sistema)
+function _pmTramite(dni,tipo,nota,tel){
+  var c=_pmCliente(dni); if(!c) return false;
+  if(!DB.clientes.some(function(x){ return x.id===c.id; })) DB.clientes.push(c);
+  var now=new Date(), fh=fmtDMA(now)+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  if(!c.tramites) c.tramites=[];
+  c.tramites.push({tipo:tipo,fechaHora:fh,nota:nota,tel:tel||null,estadoCambio:null,user:(window._fbUserEmail||'')});
+  saveDB(c);
+  return true;
+}
+function pmEscuchar(){
+  _pm.err='';
+  window.promesasEscuchar(_pm.mes,function(rows,err){
+    if(err){ _pm.err=err.code||err.message; _pm.rows=[]; } else { _pm.rows=rows; _pm.err=''; }
+    if(typeof modActivo!=='undefined' && modActivo==='promesas' && _pm.vista==='mes') pmRenderCuerpo();
+  });
+}
+function renderPromesas(){
+  var el=document.getElementById('mainArea'); if(!el) return;
+  if(!_pm.mes) _pm.mes=_pmHoy().slice(0,7);
+  var adm=window.esAdmin();
+  var opts=[], hoy=new Date(), y0=2025, mActual=hoy.getFullYear()*12+hoy.getMonth();
+  for(var k=y0*12;k<=mActual+3;k++){ var yy=Math.floor(k/12), mm=k%12+1, key=yy+'-'+('0'+mm).slice(-2); opts.push('<option value="'+key+'"'+(key===_pm.mes?' selected':'')+'>'+_PM_MESES[mm-1]+' '+yy+'</option>'); }
+  el.innerHTML='<div style="padding:16px;max-width:1250px">'+
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+
+      '<div style="font-size:15px;font-weight:600;margin-right:6px">&#129309; Promesas de pago</div>'+
+      '<button class="btn btn-outline btn-sm" onclick="pmMesMover(-1)">&#8249;</button>'+
+      '<select id="pm-mes-sel" onchange="pmMesElegir(this.value)" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+opts.join('')+'</select>'+
+      '<button class="btn btn-outline btn-sm" onclick="pmMesMover(1)">&#8250;</button>'+
+      '<div style="flex:1"></div>'+
+      '<button class="btn btn-outline btn-sm" onclick="pmVista(\''+(_pm.vista==='mes'?'hist':'mes')+'\')">'+(_pm.vista==='mes'?'&#128202; Ver histórico':'&#8592; Volver al mes')+'</button>'+
+      '<button class="btn btn-dark btn-sm" onclick="pmNueva(false)">+ Nueva promesa</button>'+
+      (adm?'<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'pm-file\').click()">&#128229; Importar Excel</button><input type="file" id="pm-file" accept=".xlsx,.xls" style="display:none" onchange="pmImportarLeer(event)">':'')+
+    '</div><div id="pm-cuerpo"></div></div>';
+  if(_pm.vista==='hist'){ pmRenderHist(); return; }
+  pmEscuchar(); pmRenderCuerpo();
+}
+function pmMesElegir(k){ _pm.mes=k; _pm.fEst=''; _pm.fFin=''; _pm.q=''; _pm.rows=[]; pmEscuchar(); pmRenderCuerpo(); }
+function pmMesMover(d){
+  var p=_pm.mes.split('-'), n=parseInt(p[0],10)*12+parseInt(p[1],10)-1+d;
+  var key=Math.floor(n/12)+'-'+('0'+(n%12+1)).slice(-2);
+  var s=document.getElementById('pm-mes-sel'); if(s&&!Array.prototype.some.call(s.options,function(o){return o.value===key;})) return;
+  if(s) s.value=key; pmMesElegir(key);
+}
+function pmVista(v){ _pm.vista=v; renderPromesas(); }
+function _pmBarra(pct,col){ return '<div style="height:7px;background:#eef1f6;border-radius:4px;overflow:hidden;min-width:70px"><div style="height:100%;width:'+Math.max(0,Math.min(100,pct))+'%;background:'+col+'"></div></div>'; }
+function _pmKpi(tit,monto,sub,col,bg){ return '<div style="background:'+bg+';border-radius:10px;padding:12px 14px;flex:1;min-width:150px"><div style="font-size:11px;color:'+col+';font-weight:600">'+tit+'</div><div style="font-size:20px;font-weight:700;color:'+col+'">'+monto+'</div><div style="font-size:11px;color:'+col+';opacity:.85">'+sub+'</div></div>'; }
+function pmRenderCuerpo(){
+  var cont=document.getElementById('pm-cuerpo'); if(!cont||_pm.vista!=='mes') return;
+  var adm=window.esAdmin(), rows=_pm.rows||[], R=_pmResumen(rows);
+  if(_pm.err){ cont.innerHTML='<div class="card" style="color:#c0392b;font-size:13px">No se pueden leer las promesas ('+_escU(_pm.err)+'). Revisá que las reglas de Firestore estén actualizadas (Herramientas &gt; Usuarios &gt; Copiar reglas).</div>'; return; }
+  var cnt={hoy:0,vencida:0};
+  rows.forEach(function(r){ var e=_pmEstado(r); if(cnt[e]!==undefined) cnt[e]++; });
+  var efect=R.proy?Math.round(R.cobr*100/R.proy):0;
+  var fins=Object.keys(R.porFin).sort(function(a,b){ return R.porFin[b].proy-R.porFin[a].proy; });
+  var html='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+
+    _pmKpi('Proyectado',_fm(R.proy),R.n+' promesa'+(R.n===1?'':'s'),'#1a3a6b','#eaf1fb')+
+    _pmKpi('Cobrado',_fm(R.cobr),R.nCobr+' cobrada'+(R.nCobr===1?'':'s')+' · '+efect+'% de lo proyectado','#1a7a3d','#e3f4e8')+
+    _pmKpi('Caído',_fm(R.caido),R.nCaido+' caída'+(R.nCaido===1?'':'s'),'#b3261e','#fde7e5')+
+    _pmKpi('Pendiente',_fm(R.pend),R.nPend+' por cobrar','#8a6100','#fff3d1')+'</div>';
+  if(cnt.hoy||cnt.vencida){
+    html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
+      (cnt.hoy?'<button class="btn btn-outline btn-sm" style="border-color:#1d4ed8;color:#1d4ed8" onclick="pmFiltroEst(\'hoy\')">&#9200; Vencen hoy: '+cnt.hoy+'</button>':'')+
+      (cnt.vencida?'<button class="btn btn-outline btn-sm" style="border-color:#b45309;color:#b45309" onclick="pmFiltroEst(\'vencida\')">&#9888;&#65039; Vencidas sin pago: '+cnt.vencida+'</button>':'')+'</div>';
+  }
+  if(fins.length>1||(fins.length===1&&R.n)){
+    html+='<div class="card" style="margin-bottom:12px"><div class="card-title" style="margin-bottom:6px">Por financiera</div><table class="tbl" style="width:100%"><thead><tr><th>Financiera</th><th style="text-align:right">Promesas</th><th style="text-align:right">Proyectado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Caído</th><th>% cobrado</th></tr></thead><tbody>'+
+      fins.map(function(f){ var F=R.porFin[f], p=F.proy?Math.round(F.cobr*100/F.proy):0; return '<tr><td>'+_escU(f)+'</td><td style="text-align:right">'+F.n+'</td><td style="text-align:right">'+_fm(F.proy)+'</td><td style="text-align:right">'+_fm(F.cobr)+'</td><td style="text-align:right">'+_fm(F.caido)+'</td><td style="min-width:130px"><div style="display:flex;align-items:center;gap:6px">'+_pmBarra(p,'#1a9a4a')+'<span style="font-size:11px">'+p+'%</span></div></td></tr>'; }).join('')+'</tbody></table></div>';
+  }
+  // filtros
+  var estOpts=['','pendiente','hoy','vencida','parcial','cobrada','caida'].map(function(e){ return '<option value="'+e+'"'+(_pm.fEst===e?' selected':'')+'>'+(e?_PM_EST[e][0]:'Todos los estados')+'</option>'; }).join('');
+  var finOpts='<option value="">Todas las financieras</option>'+fins.map(function(f){ return '<option'+(_pm.fFin===f?' selected':'')+'>'+_escU(f)+'</option>'; }).join('');
+  html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><select id="pm-f-est" onchange="pmFiltrar()" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px">'+estOpts+'</select>'+
+    '<select id="pm-f-fin" onchange="pmFiltrar()" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px">'+finOpts+'</select>'+
+    '<input id="pm-f-q" value="'+_escU(_pm.q)+'" oninput="pmFiltrar(true)" placeholder="Buscar nombre, DNI o teléfono…" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px;width:230px;outline:none"></div>'+
+    '<div id="pm-tabla"></div>';
+  cont.innerHTML=html;
+  pmRenderTabla();
+}
+function pmFiltroEst(e){ _pm.fEst=e; var s=document.getElementById('pm-f-est'); if(s) s.value=e; pmRenderTabla(); }
+function pmFiltrar(soloTexto){
+  _pm.fEst=document.getElementById('pm-f-est').value; _pm.fFin=document.getElementById('pm-f-fin').value; _pm.q=document.getElementById('pm-f-q').value;
+  pmRenderTabla();
+}
+function pmRenderTabla(){
+  var cont=document.getElementById('pm-tabla'); if(!cont) return;
+  var adm=window.esAdmin(), q=(_pm.q||'').trim().toLowerCase(), MAX=1000;
+  var rows=(_pm.rows||[]).filter(function(r){
+    if(_pm.fEst && _pmEstado(r)!==_pm.fEst) return false;
+    if(_pm.fFin && (r.fi||'SIN FINANCIERA')!==_pm.fFin) return false;
+    if(q && (String(r.n||'')+' '+String(r.d||'')+' '+String(r.tel||'')).toLowerCase().indexOf(q)<0) return false;
+    return true;
+  }).sort(function(a,b){ return String(a.f||'').localeCompare(String(b.f||'')) || String(a.n||'').localeCompare(String(b.n||'')); });
+  if(!rows.length){ cont.innerHTML='<div class="card" style="color:#999;font-size:13px">'+((_pm.rows||[]).length?'Ninguna promesa coincide con el filtro.':'No hay promesas cargadas en '+_pmMesNombre(_pm.mes)+'. Usá "+ Nueva promesa"'+(adm?' o "Importar Excel"':'')+'.')+'</div>'; return; }
+  var html='<div class="card" style="padding:0;overflow:auto"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Fecha</th><th>DNI</th><th>Nombre</th><th>Plan</th><th>Lugar</th><th>Financiera</th><th style="text-align:right">Monto</th><th style="text-align:right">Cobrado</th><th>Estado</th><th></th></tr></thead><tbody>';
+  rows.slice(0,MAX).forEach(function(r){
+    var e=_pmEstado(r), E=_PM_EST[e], id=_escU(r.id);
+    html+='<tr><td style="white-space:nowrap">'+(r.f?fmtDMA(r.f):'—')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.pl||'')+'</td><td>'+_escU(r.lu||'')+'</td><td>'+_escU(r.fi||'')+'</td>'+
+      '<td style="text-align:right">'+_fm(r.m||0)+'</td><td style="text-align:right">'+((r.pg||0)>0?_fm(r.pg):'')+'</td>'+
+      '<td><span style="background:'+E[2]+';color:'+E[1]+';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+E[0]+'</span></td>'+
+      '<td style="white-space:nowrap">'+
+        '<button class="btn btn-outline btn-sm" style="padding:2px 6px" title="Enviar recordatorio por WhatsApp" data-id="'+id+'" onclick="pmRecordar(this.dataset.id)">&#128172;</button> '+
+        (_pmCliente(r.d)?'<button class="btn btn-outline btn-sm" style="padding:2px 6px" title="Abrir ficha del cliente" data-id="'+id+'" onclick="pmFicha(this.dataset.id)">&#128100;</button> ':'')+
+        (adm?'<button class="btn btn-dark btn-sm" style="padding:2px 7px" title="Registrar pago" data-id="'+id+'" onclick="pmPago(this.dataset.id)">$</button> '+
+          '<button class="btn btn-outline btn-sm" style="padding:2px 6px;color:#b3261e" title="Marcar como caída" data-id="'+id+'" onclick="pmCaida(this.dataset.id)">&#10007;</button> '+
+          '<button class="btn btn-outline btn-sm" style="padding:2px 6px" title="Editar" data-id="'+id+'" onclick="pmEditar(this.dataset.id)">&#9998;</button> '+
+          '<button class="btn btn-red btn-sm" style="padding:2px 6px" title="Eliminar" data-id="'+id+'" onclick="pmEliminar(this.dataset.id)">&#128465;</button>':'')+
+      '</td></tr>';
+  });
+  html+='</tbody></table></div>'+(rows.length>MAX?'<div style="font-size:11px;color:#888;margin-top:6px">Se muestran las primeras '+MAX+' de '+rows.length+'. Usá los filtros para acotar.</div>':'');
+  cont.innerHTML=html;
+}
+function _pmFila(id){ return (_pm.rows||[]).find(function(r){ return r.id===id; }); }
+
+// ----- Historico por mes -----
+async function pmRenderHist(){
+  var cont=document.getElementById('pm-cuerpo'); if(!cont) return;
+  cont.innerHTML='<div class="card" style="color:#888;font-size:13px">Cargando histórico…</div>';
+  try{ _pm.hist=await window.promesasTodos(); }catch(err){ cont.innerHTML='<div class="card" style="color:#c0392b;font-size:13px">No se pudo leer el histórico ('+_escU(err.code||err.message)+').</div>'; return; }
+  var meses=Object.keys(_pm.hist).sort(), tot={n:0,proy:0,cobr:0,caido:0,pend:0}, fin={};
+  var filas=meses.map(function(m){
+    var R=_pmResumen(_pm.hist[m]); tot.n+=R.n; tot.proy+=R.proy; tot.cobr+=R.cobr; tot.caido+=R.caido; tot.pend+=R.pend;
+    Object.keys(R.porFin).forEach(function(f){ var F=fin[f]||(fin[f]={n:0,proy:0,cobr:0,caido:0}); var X=R.porFin[f]; F.n+=X.n; F.proy+=X.proy; F.cobr+=X.cobr; F.caido+=X.caido; });
+    var p=R.proy?Math.round(R.cobr*100/R.proy):0;
+    return '<tr style="cursor:pointer" data-m="'+m+'" onclick="_pm.vista=\'mes\';pmMesElegirDesdeHist(this.dataset.m)"><td style="font-weight:600">'+_pmMesNombre(m)+'</td><td style="text-align:right">'+R.n+'</td><td style="text-align:right">'+_fm(R.proy)+'</td><td style="text-align:right">'+_fm(R.cobr)+'</td><td style="text-align:right">'+_fm(R.caido)+'</td><td style="text-align:right">'+_fm(R.pend)+'</td><td style="min-width:140px"><div style="display:flex;align-items:center;gap:6px">'+_pmBarra(p,'#1a9a4a')+'<span style="font-size:11px">'+p+'%</span></div></td></tr>';
+  }).join('');
+  var pt=tot.proy?Math.round(tot.cobr*100/tot.proy):0;
+  var ff=Object.keys(fin).sort(function(a,b){ return fin[b].proy-fin[a].proy; }).map(function(f){ var F=fin[f], p=F.proy?Math.round(F.cobr*100/F.proy):0;
+    return '<tr><td>'+_escU(f)+'</td><td style="text-align:right">'+F.n+'</td><td style="text-align:right">'+_fm(F.proy)+'</td><td style="text-align:right">'+_fm(F.cobr)+'</td><td style="text-align:right">'+_fm(F.caido)+'</td><td style="min-width:140px"><div style="display:flex;align-items:center;gap:6px">'+_pmBarra(p,'#1a9a4a')+'<span style="font-size:11px">'+p+'%</span></div></td></tr>'; }).join('');
+  if(!meses.length){ cont.innerHTML='<div class="card" style="color:#999;font-size:13px">Todavía no hay promesas cargadas.</div>'; return; }
+  cont.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+
+    _pmKpi('Proyectado total',_fm(tot.proy),tot.n+' promesas en '+meses.length+' meses','#1a3a6b','#eaf1fb')+
+    _pmKpi('Cobrado total',_fm(tot.cobr),pt+'% de lo proyectado','#1a7a3d','#e3f4e8')+
+    _pmKpi('Caído total',_fm(tot.caido),'','#b3261e','#fde7e5')+_pmKpi('Pendiente',_fm(tot.pend),'','#8a6100','#fff3d1')+'</div>'+
+    '<div class="card" style="margin-bottom:12px;padding:0;overflow:auto"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Mes</th><th style="text-align:right">Promesas</th><th style="text-align:right">Proyectado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Caído</th><th style="text-align:right">Pendiente</th><th>% cobrado</th></tr></thead><tbody>'+filas+'</tbody></table></div>'+
+    '<div class="card" style="padding:0;overflow:auto"><div class="card-title" style="padding:10px 12px 0">Por financiera (todos los meses)</div><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Financiera</th><th style="text-align:right">Promesas</th><th style="text-align:right">Proyectado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Caído</th><th>% cobrado</th></tr></thead><tbody>'+ff+'</tbody></table></div>'+
+    '<div style="font-size:11px;color:#888;margin-top:6px">Tocá un mes para abrirlo.</div>';
+}
+function pmMesElegirDesdeHist(m){ _pm.mes=m; _pm.fEst=''; _pm.fFin=''; _pm.q=''; renderPromesas(); }
+
+// ----- Alta / edicion -----
+function _pmCampos(o){
+  document.getElementById('pm-id').value=o.id||''; document.getElementById('pm-mes').value=o.mes||'';
+  document.getElementById('pm-dni').value=o.d||''; document.getElementById('pm-nombre').value=o.n||''; document.getElementById('pm-tel').value=o.tel||'';
+  document.getElementById('pm-fin').value=o.fi||''; document.getElementById('pm-monto').value=o.m||''; document.getElementById('pm-fecha').value=o.f||'';
+  document.getElementById('pm-plan').value=o.pl||''; document.getElementById('pm-lugar').value=o.lu||'BANCO'; document.getElementById('pm-tp').value=o.tp||'PP';
+  document.getElementById('pm-ng').value=o.ng||''; document.getElementById('pm-mo').value=o.mo||''; document.getElementById('pm-pu').value=o.pu||'';
+  document.getElementById('pm-msg').textContent='';
+  var fins={}; (DB.entidades||[]).forEach(function(e){fins[e]=1;}); (_pm.rows||[]).forEach(function(r){ if(r.fi) fins[r.fi]=1; });
+  document.getElementById('pm-fin-l').innerHTML=Object.keys(fins).map(function(f){ return '<option value="'+_escU(f)+'">'; }).join('');
+}
+function pmNueva(deFicha){
+  var o={};
+  if(deFicha){
+    var c=clienteActivo; if(!c){ alert('Abrí un cliente primero.'); return; }
+    var cr=(c.creditos||[])[0]||{};
+    o={d:c.dni||'',n:c.nombre||'',tel:_telLimpio((c.telefonos||[])[0]||''),fi:cr.entidad||c.entidad||''};
+  }
+  o.reg=true;
+  _pmCampos(o);
+  document.getElementById('pm-tit').textContent='Nueva promesa de pago';
+  document.getElementById('pm-reg').checked=true;
+  document.getElementById('modalPm').classList.add('open');
+}
+function pmEditar(id){
+  if(!window.soloAdmin()) return;
+  var r=_pmFila(id); if(!r) return;
+  _pmCampos(Object.assign({},r,{mes:_pm.mes}));
+  document.getElementById('pm-tit').textContent='Editar promesa';
+  document.getElementById('pm-reg').checked=false;
+  document.getElementById('modalPm').classList.add('open');
+}
+function pmDniBlur(){
+  var c=_pmCliente(document.getElementById('pm-dni').value); if(!c) return;
+  var set=function(id,v){ var e=document.getElementById(id); if(e&&!e.value&&v) e.value=v; };
+  var cr=(c.creditos||[])[0]||{};
+  set('pm-nombre',c.nombre); set('pm-tel',_telLimpio((c.telefonos||[])[0]||'')); set('pm-fin',cr.entidad||c.entidad||'');
+}
+async function pmGuardar(){
+  var g=function(id){ return document.getElementById(id).value.trim(); }, msg=document.getElementById('pm-msg');
+  var dni=g('pm-dni').replace(/\D/g,''), nombre=g('pm-nombre'), monto=_pmNum(g('pm-monto')), fecha=g('pm-fecha');
+  if(!dni){ msg.textContent='Cargá el DNI.'; return; }
+  if(!nombre){ msg.textContent='Cargá el nombre.'; return; }
+  if(!(monto>0)){ msg.textContent='Cargá el monto a abonar.'; return; }
+  if(!fecha){ msg.textContent='Elegí la fecha prometida.'; return; }
+  var editId=g('pm-id'), mesEdit=g('pm-mes');
+  var r={d:dni,n:nombre,tel:g('pm-tel'),fi:g('pm-fin'),m:monto,f:fecha,pl:g('pm-plan').toUpperCase(),lu:g('pm-lugar'),tp:g('pm-tp'),ng:g('pm-ng'),mo:_pmNum(g('pm-mo')),pu:_pmNum(g('pm-pu')),u:(window._fbUserEmail||''),t:Date.now()};
+  var mes=editId?mesEdit:fecha.slice(0,7), id=editId||_pmId(r);
+  try{
+    if(editId){ var ant=_pmFila(editId)||{}; r.pg=ant.pg||0; r.cd=ant.cd||0; r.fp=ant.fp||''; r.u=ant.u||r.u; }
+    await window.promesasGuardar(mes,id,r);
+    if(!editId && document.getElementById('pm-reg').checked){
+      _pmTramite(dni,'Promesa de pago','Promesa de pago de '+_fm(monto)+' para el '+fmtDMA(fecha)+(r.pl?' ('+r.pl+')':''),r.tel);
+      if(typeof tabActiva!=='undefined' && tabActiva==='tramites' && clienteActivo) setTabAdmin('tramites');
+    }
+    cerrarModal('modalPm'); _toast('Promesa guardada');
+    if(mes!==_pm.mes && typeof modActivo!=='undefined' && modActivo==='promesas'){ _pm.mes=mes; renderPromesas(); }
+  }catch(err){ msg.textContent='No se pudo guardar: '+((err&&err.code==='permission-denied')?'faltan actualizar las reglas de Firestore.':(err.message||err)); }
+}
+// ----- Pagos / caidas / baja (administrador) -----
+function pmPago(id){
+  if(!window.soloAdmin()) return;
+  var r=_pmFila(id); if(!r) return;
+  document.getElementById('pp-id').value=id;
+  document.getElementById('pp-tit').textContent='Registrar pago · '+(r.n||'');
+  document.getElementById('pp-monto').value=(r.pg>0?r.pg:(r.m||''));
+  document.getElementById('pp-fecha').value=r.fp||_pmHoy();
+  document.getElementById('modalPmPago').classList.add('open');
+}
+async function pmPagoGuardar(){
+  if(!window.soloAdmin()) return;
+  var id=document.getElementById('pp-id').value, r=_pmFila(id); if(!r) return;
+  var monto=_pmNum(document.getElementById('pp-monto').value), fecha=document.getElementById('pp-fecha').value||_pmHoy();
+  if(!(monto>0)){ alert('Cargá el monto cobrado.'); return; }
+  try{
+    await window.promesasGuardar(_pm.mes,id,{pg:monto,fp:fecha,cd:0});
+    _pmTramite(r.d,'Pago','Pago registrado de '+_fm(monto)+' el '+fmtDMA(fecha)+(r.pl?' ('+r.pl+')':'')+(monto<(r.m||0)-0.5?' – pago parcial (prometido '+_fm(r.m)+')':''),r.tel);
+    cerrarModal('modalPmPago'); _toast('Pago registrado');
+  }catch(err){ alert('No se pudo guardar: '+(err.message||err)); }
+}
+async function pmCaida(id){
+  if(!window.soloAdmin()) return;
+  var r=_pmFila(id); if(!r) return;
+  if(!confirm('¿Marcar como caída la promesa de '+(r.n||'')+' por '+_fm(r.m||0)+'?')) return;
+  try{
+    await window.promesasGuardar(_pm.mes,id,{cd:Math.max(0,(r.m||0)-(r.pg||0)),fp:''});
+    _pmTramite(r.d,'Otro','Promesa de pago caída ('+_fm(r.m||0)+' del '+(r.f?fmtDMA(r.f):'')+')',r.tel);
+  }catch(err){ alert('No se pudo guardar: '+(err.message||err)); }
+}
+async function pmEliminar(id){
+  if(!window.soloAdmin()) return;
+  var r=_pmFila(id); if(!r) return;
+  if(!confirm('¿Eliminar la promesa de '+(r.n||'')+'?')) return;
+  try{ await window.promesasGuardar(_pm.mes,id,{x:true}); }catch(err){ alert('No se pudo eliminar: '+(err.message||err)); }
+}
+// ----- Recordatorio por WhatsApp -----
+function pmRecordar(id){
+  var r=_pmFila(id); if(!r) return;
+  var cli=_pmCliente(r.d), tel=r.tel||(cli&&(cli.telefonos||[])[0])||'';
+  var n=_waNum(tel);
+  if(!n){ alert('Esta promesa no tiene un teléfono válido (con código de área).'); return; }
+  var P=_pagoEnt(r.fi||''), nom=_pmNombreBonito(r.n).split(' ')[0]||'';
+  var vencida=r.f&&r.f<_pmHoy();
+  var t='Hola '+nom+', te escribimos de '+(P.empresa||'EPSAN')+'. '+(vencida?'Registramos que tu compromiso de pago de ':'Te recordamos tu compromiso de pago de ')+_fm(r.m||0)+' '+(vencida?'con vencimiento el ':'para el ')+(r.f?fmtDMA(r.f):'')+(r.pl?' ('+r.pl+')':'')+(vencida?' todavía no figura acreditado.':'.')+
+    (r.lu?'\nLugar de pago: '+r.lu+'.':'')+(P.alias?'\nTambién podés transferir al alias *'+P.alias+'*'+(P.titular?' (titular '+P.titular+')':'')+'.':'')+
+    '\n\nCuando abones, enviá el comprobante por este chat. ¡Gracias!';
+  window.open('https://wa.me/'+n+'?text='+encodeURIComponent(t),'_blank');
+  _pmTramite(r.d,'WhatsApp','Recordatorio de promesa enviado ('+_fm(r.m||0)+' para el '+(r.f?fmtDMA(r.f):'')+')',_telLimpio(tel));
+}
+function pmFicha(id){
+  var r=_pmFila(id), c=r&&_pmCliente(r.d); if(!c) return;
+  var b=document.querySelector('.mb[onclick*="\'admin\'"]'); if(b) setMod('admin',b);
+  selCliente(c.id); setTabAdmin('datos');
+}
+// ----- Importar desde el Excel de seguimiento (administrador) -----
+var _pmImp=null;
+function _pmMesDeHoja(nom){
+  var m=/^\s*(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|SETIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s*(\d{2,4})\s*$/i.exec(String(nom));
+  if(!m) return null;
+  var meses=['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+  var mn=m[1].toUpperCase(); if(mn==='SETIEMBRE') mn='SEPTIEMBRE';
+  var y=parseInt(m[2],10); if(y<100) y+=2000;
+  return y+'-'+('0'+(meses.indexOf(mn)+1)).slice(-2);
+}
+function _pmNormH(s){ return String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim(); }
+function _pmFechaISO(v){
+  if(typeof v==='number' && v>20000 && v<80000){ return new Date(Date.UTC(1899,11,30)+Math.round(v)*864e5).toISOString().slice(0,10); }
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  var s=String(v||'').trim(); if(!s) return '';
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  var d=(typeof parseFechaFlex==='function')?parseFechaFlex(s):null;
+  return (d&&!isNaN(d))?(d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)):'';
+}
+function _pmLeerLibro(wb){
+  var out={}, ignoradas=[];
+  wb.SheetNames.forEach(function(nom){
+    var mes=_pmMesDeHoja(nom);
+    if(!mes){ ignoradas.push(nom); return; }
+    var filas=XLSX.utils.sheet_to_json(wb.Sheets[nom],{header:1,raw:true,defval:''});
+    var hi=filas.findIndex(function(f){ var n=f.map(_pmNormH); return n.indexOf('DNI')>=0 && n.some(function(x){ return x.indexOf('NOMBRE')===0; }) && n.some(function(x){ return x.indexOf('MONTO A ABONAR')===0; }); });
+    if(hi<0){ ignoradas.push(nom); return; }
+    var col={}; filas[hi].forEach(function(c,i){ var k=_pmNormH(c); if(k&&col[k]===undefined) col[k]=i; });
+    var G=function(f,k){ return col[k]===undefined?'':f[col[k]]; };
+    var lista={};
+    for(var i=hi+1;i<filas.length;i++){
+      var f=filas[i], dni=String(G(f,'DNI')).replace(/\D/g,'');
+      if(!dni) break;
+      var fecha=_pmFechaISO(G(f,'FECHA')), monto=_pmNum(G(f,'MONTO A ABONAR'));
+      if(!fecha||!(monto>0)) continue;
+      var r={d:dni,n:String(G(f,'NOMBRE')).trim(),m:monto,f:fecha,ng:String(G(f,'U DE NEGOCIO')).trim(),tp:String(G(f,'RES')).trim(),pl:String(G(f,'PLAN')).trim().toUpperCase(),lu:String(G(f,'LUGAR')).trim(),tel:String(G(f,'TELEFONO')).replace(/\.0$/,'').trim(),fi:String(G(f,'FINANCIERA')).trim(),u:'importado',t:Date.now()};
+      var mo=_pmNum(G(f,'MONTO ORIG')), pu=_pmNum(G(f,'PUNIT')), pg=_pmNum(G(f,'PAGO')), cd=_pmNum(G(f,'CAIDO'));
+      if(mo) r.mo=mo; if(pu) r.pu=pu; if(pg>0){ r.pg=pg; } if(cd>0&&!(pg>0)) r.cd=cd;
+      lista[_pmId(r)]=r;
+    }
+    out[mes]=lista;
+  });
+  return {meses:out,ignoradas:ignoradas};
+}
+async function pmImportarLeer(e){
+  var f=e.target.files[0]; e.target.value=''; if(!f||!window.soloAdmin()) return;
+  if(typeof XLSX==='undefined'){ alert('No se pudo cargar el lector de Excel. Recargá la página.'); return; }
+  try{
+    _toast('Leyendo '+f.name+'…');
+    var bytes=await _archLeerArchivo(f), wb=XLSX.read(bytes,{type:'array'});
+    var R=_pmLeerLibro(wb), meses=Object.keys(R.meses).sort();
+    if(!meses.length){ alert('No encontré hojas de meses con el formato esperado (ENERO 25, FEBRERO 25… con columnas DNI, NOMBRE, MONTO A ABONAR, FECHA).'); return; }
+    _pmImp=R;
+    var tot=0, totM=0, filas=meses.map(function(m){ var l=Object.keys(R.meses[m]).map(function(k){return R.meses[m][k];}); var s=l.reduce(function(a,x){return a+x.m;},0), c=l.reduce(function(a,x){return a+(x.pg||0);},0); tot+=l.length; totM+=s;
+      return '<tr><td>'+_pmMesNombre(m)+'</td><td style="text-align:right">'+l.length+'</td><td style="text-align:right">'+_fm(s)+'</td><td style="text-align:right">'+_fm(c)+'</td></tr>'; }).join('');
+    document.getElementById('pmi-cuerpo').innerHTML='<div style="margin-bottom:8px">Archivo: <strong>'+_escU(f.name)+'</strong>. Se van a importar <strong>'+tot+'</strong> promesas de <strong>'+meses.length+'</strong> meses.</div>'+
+      '<div style="max-height:260px;overflow:auto;border:1px solid #e1e6ef;border-radius:8px"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Mes</th><th style="text-align:right">Promesas</th><th style="text-align:right">Proyectado</th><th style="text-align:right">Cobrado</th></tr></thead><tbody>'+filas+'</tbody></table></div>'+
+      '<div style="font-size:11px;color:#888;margin-top:8px">Si una promesa ya estaba cargada (mismo DNI, fecha, plan y monto), se actualiza con los datos del Excel; no se duplica. Hojas ignoradas: '+(R.ignoradas.length?_escU(R.ignoradas.join(', ')):'ninguna')+'.</div><div id="pmi-prog" style="font-size:12px;color:#2557a7;margin-top:6px"></div>';
+    document.getElementById('pmi-ok').disabled=false;
+    document.getElementById('modalPmImp').classList.add('open');
+  }catch(err){ alert('No se pudo leer el archivo: '+(err.message||err)); }
+}
+async function pmImportarConfirmar(){
+  if(!window.soloAdmin()||!_pmImp) return;
+  var btn=document.getElementById('pmi-ok'), prog=document.getElementById('pmi-prog'), meses=Object.keys(_pmImp.meses).sort(), hechos=0;
+  btn.disabled=true;
+  try{
+    for(var i=0;i<meses.length;i++){
+      prog.textContent='Guardando '+_pmMesNombre(meses[i])+' ('+(i+1)+' de '+meses.length+')…';
+      await window.promesasGuardarMuchas(meses[i],_pmImp.meses[meses[i]]);
+      hechos+=Object.keys(_pmImp.meses[meses[i]]).length;
+    }
+    prog.style.color='#27500A'; prog.textContent='Listo: '+hechos+' promesas importadas.';
+    _pmImp=null; _toast('Importación terminada');
+    if(_pm.vista==='hist') pmRenderHist();
+  }catch(err){ prog.style.color='#c0392b'; prog.textContent='Se interrumpió en '+_pmMesNombre(meses[i]||'')+': '+((err&&err.code==='permission-denied')?'faltan actualizar las reglas de Firestore.':(err.message||err)); btn.disabled=false; }
+}
+
+// ===================================================
 // PERMISOS: funciones exclusivas del administrador
 // (la pantalla oculta los botones; esto bloquea tambien cualquier llamada directa)
 // ===================================================
@@ -5682,7 +6129,7 @@ function _archFiltrarX(q){
  'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
  'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
  'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs',
- 'archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
+ 'pmPago','pmPagoGuardar','pmCaida','pmEliminar','pmEditar','pmImportarLeer','pmImportarConfirmar','archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
 ].forEach(function(n){
   var f=window[n];
   if(typeof f!=='function') return;
