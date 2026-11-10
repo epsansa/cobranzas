@@ -1090,7 +1090,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -6082,13 +6082,19 @@ function _pmFechaISO(v){
 function _pmLeerLibro(wb){
   var out={}, ignoradas=[];
   wb.SheetNames.forEach(function(nom){
-    var mes=_pmMesDeHoja(nom);
-    if(!mes){ ignoradas.push(nom); return; }
+    var mes=_pmMesDeHoja(nom); // si la hoja no se llama como un mes, cada promesa va al mes de su fecha
     var filas=XLSX.utils.sheet_to_json(wb.Sheets[nom],{header:1,raw:true,defval:''});
-    var hi=filas.findIndex(function(f){ var n=f.map(_pmNormH); return n.indexOf('DNI')>=0 && n.some(function(x){ return x.indexOf('NOMBRE')===0; }) && n.some(function(x){ return x.indexOf('MONTO A ABONAR')===0; }); });
+    var esMonto=function(x){ return x.indexOf('MONTO A ABONAR')===0||x==='MONTO'||x==='IMPORTE'||x==='MONTO PROMETIDO'||x==='MONTO A PAGAR'; };
+    var hi=filas.findIndex(function(f){ var n=f.map(_pmNormH); return n.indexOf('DNI')>=0 && n.some(function(x){ return x.indexOf('NOMBRE')===0||x==='APELLIDO Y NOMBRE'||x==='CLIENTE'; }) && n.some(esMonto) && n.some(function(x){ return x.indexOf('FECHA')===0; }); });
     if(hi<0){ ignoradas.push(nom); return; }
     var col={}; filas[hi].forEach(function(c,i){ var k=_pmNormH(c); if(k&&col[k]===undefined) col[k]=i; });
-    var G=function(f,k){ return col[k]===undefined?'':f[col[k]]; };
+    var alias={'MONTO A ABONAR':['MONTO','IMPORTE','MONTO PROMETIDO','MONTO A PAGAR'],'NOMBRE':['APELLIDO Y NOMBRE','CLIENTE'],'FECHA':['FECHA PROMESA','FECHA DE PAGO','FECHA PROMETIDA'],'FINANCIERA':['ENTIDAD'],'U DE NEGOCIO':['NEGOCIO','UNIDAD DE NEGOCIO'],'TELEFONO':['TEL','CELULAR']};
+    var G=function(f,k){
+      var ks=[k].concat(alias[k]||[]);
+      for(var q=0;q<ks.length;q++){ if(col[ks[q]]!==undefined) return f[col[ks[q]]]; }
+      if(k==='NOMBRE'||k==='FECHA'){ var kk=Object.keys(col).filter(function(x){ return x.indexOf(k)===0; })[0]; if(kk) return f[col[kk]]; }
+      return '';
+    };
     var lista={};
     for(var i=hi+1;i<filas.length;i++){
       var f=filas[i], dni=String(G(f,'DNI')).replace(/\D/g,'');
@@ -6098,9 +6104,10 @@ function _pmLeerLibro(wb){
       var r={d:dni,n:String(G(f,'NOMBRE')).trim(),m:monto,f:fecha,ng:String(G(f,'U DE NEGOCIO')).trim(),tp:String(G(f,'RES')).trim(),pl:String(G(f,'PLAN')).trim().toUpperCase(),lu:String(G(f,'LUGAR')).trim(),tel:String(G(f,'TELEFONO')).replace(/\.0$/,'').trim(),fi:String(G(f,'FINANCIERA')).trim(),u:'importado',t:Date.now()};
       var mo=_pmNum(G(f,'MONTO ORIG')), pu=_pmNum(G(f,'PUNIT')), pg=_pmNum(G(f,'PAGO')), cd=_pmNum(G(f,'CAIDO'));
       if(mo) r.mo=mo; if(pu) r.pu=pu; if(pg>0){ r.pg=pg; } if(cd>0&&!(pg>0)) r.cd=cd;
-      lista[_pmId(r)]=r;
+      var mk=mes||fecha.slice(0,7);
+      (out[mk]||(out[mk]={}))[_pmId(r)]=r;
     }
-    out[mes]=lista;
+    if(mes&&!out[mes]) out[mes]={};
   });
   return {meses:out,ignoradas:ignoradas};
 }
