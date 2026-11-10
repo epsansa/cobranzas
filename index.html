@@ -1090,7 +1090,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.4</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.29.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -5836,11 +5836,13 @@ function renderPromesas(){
       '<select id="pm-mes-sel" onchange="pmMesElegir(this.value)" style="padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:13px">'+opts.join('')+'</select>'+
       '<button class="btn btn-outline btn-sm" onclick="pmMesMover(1)">&#8250;</button>'+
       '<div style="flex:1"></div>'+
-      '<button class="btn btn-outline btn-sm" onclick="pmVista(\''+(_pm.vista==='mes'?'hist':'mes')+'\')">'+(_pm.vista==='mes'?'&#128202; Ver histórico':'&#8592; Volver al mes')+'</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="pmVista(\''+(_pm.vista==='sub'?'mes':'sub')+'\')">'+(_pm.vista==='sub'?'&#8592; Volver al mes':'&#128176; Subdiario cobrado')+'</button>'+
+      '<button class="btn btn-outline btn-sm" onclick="pmVista(\''+(_pm.vista==='hist'?'mes':'hist')+'\')">'+(_pm.vista==='hist'?'&#8592; Volver al mes':'&#128202; Ver histórico')+'</button>'+
       '<button class="btn btn-dark btn-sm" onclick="pmNueva(false)">+ Nueva promesa</button>'+
       (adm?'<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'pm-file\').click()">&#128229; Importar Excel</button><input type="file" id="pm-file" accept=".xlsx,.xls" style="display:none" multiple onchange="pmImportarLeer(event)">':'')+
     '</div><div id="pm-cuerpo"></div></div>';
   if(_pm.vista==='hist'){ pmRenderHist(); return; }
+  if(_pm.vista==='sub'){ pmRenderSub(); return; }
   pmEscuchar(); pmRenderCuerpo();
 }
 function pmMesElegir(k){ _pm.mes=k; _pm.fEst=''; _pm.fFin=''; _pm.q=''; _pm.rows=[]; pmEscuchar(); pmRenderCuerpo(); }
@@ -5903,7 +5905,7 @@ function pmRenderTabla(){
   var html='<div class="card" style="padding:0;overflow:auto"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Fecha</th><th>DNI</th><th>Nombre</th><th>Plan</th><th>Lugar</th><th>Financiera</th><th style="text-align:right">Monto</th><th style="text-align:right">Cobrado</th><th>Estado</th><th></th></tr></thead><tbody>';
   rows.slice(0,MAX).forEach(function(r){
     var e=_pmEstado(r), E=_PM_EST[e], id=_escU(r.id);
-    html+='<tr><td style="white-space:nowrap">'+(r.f?fmtDMA(r.f):'—')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.pl||'')+(r.cr?'<div style="font-size:10px;color:#888">Cr\u00e9dito '+_escU(r.cr)+'</div>':'')+'</td><td>'+_escU(r.lu||'')+'</td><td>'+_escU(r.fi||'')+'</td>'+
+    html+='<tr><td style="white-space:nowrap">'+(r.f?fmtDMA(r.f):'—')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.pl||'')+(r.ad?'<div style="font-size:10px;color:#1d4ed8">Adelantada (vencía '+fmtDMA(r.f)+')</div>':'')+(r.cr?'<div style="font-size:10px;color:#888">Cr\u00e9dito '+_escU(r.cr)+'</div>':'')+'</td><td>'+_escU(r.lu||'')+'</td><td>'+_escU(r.fi||'')+'</td>'+
       '<td style="text-align:right">'+_fm(r.m||0)+'</td><td style="text-align:right">'+((r.pg||0)>0?_fm(r.pg):'')+'</td>'+
       '<td><span style="background:'+E[2]+';color:'+E[1]+';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+E[0]+'</span></td>'+
       '<td style="white-space:nowrap">'+
@@ -5919,6 +5921,71 @@ function pmRenderTabla(){
   cont.innerHTML=html;
 }
 function _pmFila(id){ return (_pm.rows||[]).find(function(r){ return r.id===id; }); }
+
+// ----- Subdiario de lo cobrado por seguimiento -----
+var _pmSub={mes:'',fin:'',tipo:'',lista:[]};
+function _pmTipoCobro(r){
+  var pg=r.pg||0, m=r.m||0;
+  if(pg<m-0.5) return 'Parcial';
+  if(pg>m+0.5) return 'Con punitorios';
+  return 'Cuota original';
+}
+async function pmRenderSub(){
+  var cont=document.getElementById('pm-cuerpo'); if(!cont) return;
+  cont.innerHTML='<div class="card" style="color:#888;font-size:13px">Cargando subdiario…</div>';
+  try{ _pm.hist=await window.promesasTodos(); }catch(err){ cont.innerHTML='<div class="card" style="color:#c0392b;font-size:13px">No se pudo leer ('+_escU(err.code||err.message)+').</div>'; return; }
+  if(!_pmSub.mes) _pmSub.mes=_pm.mes;
+  var meses=Object.keys(_pm.hist).sort(), fins={};
+  meses.forEach(function(m){ _pm.hist[m].forEach(function(r){ if((r.pg||0)>0) fins[r.fi||'SIN FINANCIERA']=1; }); });
+  var mo='<option value="">Todos los meses</option>'+meses.map(function(m){ return '<option value="'+m+'"'+(_pmSub.mes===m?' selected':'')+'>'+_pmMesNombre(m)+'</option>'; }).join('');
+  var fo='<option value="">Todas las financieras</option>'+Object.keys(fins).sort().map(function(f){ return '<option'+(_pmSub.fin===f?' selected':'')+'>'+_escU(f)+'</option>'; }).join('');
+  var to='<option value="">Todos los tipos</option>'+['Cuota original','Parcial','Con punitorios'].map(function(t){ return '<option'+(_pmSub.tipo===t?' selected':'')+'>'+t+'</option>'; }).join('');
+  var st='padding:6px 9px;border:1px solid #ddd;border-radius:7px;font-size:12px';
+  cont.innerHTML='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">'+
+    '<select id="ps-mes" onchange="pmSubFiltrar()" style="'+st+'">'+mo+'</select>'+
+    '<select id="ps-fin" onchange="pmSubFiltrar()" style="'+st+'">'+fo+'</select>'+
+    '<select id="ps-tipo" onchange="pmSubFiltrar()" style="'+st+'">'+to+'</select>'+
+    '<div style="flex:1"></div><button class="btn btn-dark btn-sm" onclick="pmSubExcel()">&#128229; Exportar a Excel</button></div><div id="ps-res"></div>';
+  pmSubPintar();
+}
+function pmSubFiltrar(){ _pmSub.mes=document.getElementById('ps-mes').value; _pmSub.fin=document.getElementById('ps-fin').value; _pmSub.tipo=document.getElementById('ps-tipo').value; pmSubPintar(); }
+function pmSubPintar(){
+  var lista=[], H=_pm.hist||{};
+  Object.keys(H).sort().forEach(function(m){
+    if(_pmSub.mes && m!==_pmSub.mes) return;
+    H[m].forEach(function(r){
+      if(!((r.pg||0)>0)) return;
+      if(_pmSub.fin && (r.fi||'SIN FINANCIERA')!==_pmSub.fin) return;
+      var t=_pmTipoCobro(r); if(_pmSub.tipo && t!==_pmSub.tipo) return;
+      lista.push(Object.assign({},r,{mes:m,tipo:t}));
+    });
+  });
+  lista.sort(function(a,b){ return String(a.fp||a.f||'').localeCompare(String(b.fp||b.f||'')) || String(a.n||'').localeCompare(String(b.n||'')); });
+  _pmSub.lista=lista;
+  var T={n:0,orig:0,cobr:0,porTipo:{}};
+  lista.forEach(function(r){ T.n++; T.orig+=r.m||0; T.cobr+=r.pg||0; var X=T.porTipo[r.tipo]||(T.porTipo[r.tipo]={n:0,s:0}); X.n++; X.s+=r.pg||0; });
+  var cont=document.getElementById('ps-res'); if(!cont) return;
+  if(!lista.length){ cont.innerHTML='<div class="card" style="color:#999;font-size:13px">No hay cobros con ese filtro.</div>'; return; }
+  var col={'Cuota original':['#1a7a3d','#e3f4e8'],'Parcial':['#8a6100','#fff3d1'],'Con punitorios':['#1d4ed8','#dbeafe']};
+  cont.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'+
+    _pmKpi('Total cobrado',_fm(T.cobr),T.n+' cobro'+(T.n===1?'':'s'),'#1a7a3d','#e3f4e8')+
+    ['Cuota original','Parcial','Con punitorios'].map(function(t){ var X=T.porTipo[t]||{n:0,s:0}; return _pmKpi(t,_fm(X.s),X.n+' cobro'+(X.n===1?'':'s'),col[t][0],col[t][1]); }).join('')+'</div>'+
+    '<div class="card" style="padding:0;overflow:auto"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Fecha pago</th><th>DNI</th><th>Nombre</th><th>Crédito</th><th>Plan</th><th>Financiera</th><th style="text-align:right">Monto original</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Dif.</th><th>Tipo de cobro</th></tr></thead><tbody>'+
+    lista.slice(0,1500).map(function(r){ var dif=(r.pg||0)-(r.m||0), c=col[r.tipo];
+      return '<tr><td style="white-space:nowrap">'+((r.fp||r.f)?fmtDMA(r.fp||r.f):'')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.cr||'')+'</td><td>'+_escU(r.pl||'')+'</td><td>'+_escU(r.fi||'')+'</td><td style="text-align:right">'+_fm(r.m||0)+'</td><td style="text-align:right">'+_fm(r.pg||0)+'</td><td style="text-align:right;color:'+(dif<-0.5?'#b3261e':(dif>0.5?'#1d4ed8':'#888'))+'">'+(Math.abs(dif)<0.5?'—':(dif>0?'+':'')+_fm(dif))+'</td><td><span style="background:'+c[1]+';color:'+c[0]+';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+r.tipo+'</span></td></tr>'; }).join('')+
+    '<tr style="font-weight:700;background:#f6f8fb"><td colspan="6">Total</td><td style="text-align:right">'+_fm(T.orig)+'</td><td style="text-align:right">'+_fm(T.cobr)+'</td><td></td><td></td></tr></tbody></table></div>'+
+    (lista.length>1500?'<div style="font-size:11px;color:#888;margin-top:6px">Se muestran 1500 de '+lista.length+'; el Excel trae todos.</div>':'')+
+    '<div style="font-size:11px;color:#888;margin-top:6px">Cuota original: se cobró el monto original. Parcial: se cobró menos. Con punitorios: se cobró más que el monto original (punitorios o recargo).</div>';
+}
+function pmSubExcel(){
+  if(typeof XLSX==='undefined'||!_pmSub.lista.length){ alert('No hay datos para exportar.'); return; }
+  var filas=[['Mes','Fecha pago','DNI','Nombre','Crédito','Plan','Financiera','Unidad de negocio','Monto original','Punitorios','Cobrado','Diferencia','Saldo','Tipo de cobro']];
+  _pmSub.lista.forEach(function(r){ var dif=(r.pg||0)-(r.m||0);
+    filas.push([_pmMesNombre(r.mes),(r.fp||r.f)?fmtDMA(r.fp||r.f):'',r.d||'',r.n||'',r.cr||'',r.pl||'',r.fi||'',r.ng||'',r.m||0,r.pu||0,r.pg||0,Math.round(dif*100)/100,r.tipo==='Parcial'?Math.round(-dif*100)/100:0,r.tipo]); });
+  var ws=XLSX.utils.aoa_to_sheet(filas); ws['!cols']=[{wch:16},{wch:11},{wch:11},{wch:30},{wch:12},{wch:22},{wch:18},{wch:16},{wch:14},{wch:12},{wch:14},{wch:12},{wch:12},{wch:16}];
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Subdiario cobrado');
+  XLSX.writeFile(wb,'subdiario_promesas_'+(_pmSub.mes||'todos')+'.xlsx');
+}
 
 // ----- Historico por mes -----
 async function pmRenderHist(){
@@ -6021,9 +6088,18 @@ async function pmPagoGuardar(){
   var monto=_pmNum(document.getElementById('pp-monto').value), fecha=document.getElementById('pp-fecha').value||_pmHoy();
   if(!(monto>0)){ alert('Cargá el monto cobrado.'); return; }
   try{
-    await window.promesasGuardar(_pm.mes,id,{pg:monto,fp:fecha,cd:0});
-    _pmTramite(r.d,'Pago recibido','Pago registrado de '+_fm(monto)+' el '+fmtDMA(fecha)+(r.pl?' ('+r.pl+')':'')+(monto<(r.m||0)-0.5?' – pago parcial (prometido '+_fm(r.m)+')':''),r.tel);
-    cerrarModal('modalPmPago'); _toast('Pago registrado');
+    var completo=monto>=(r.m||0)-0.5, mesPago=fecha.slice(0,7), adel=completo && mesPago<_pm.mes;
+    if(adel){
+      // Cobro adelantado: pasa al mes en que se cobro (suma en su proyectado y cobrado) y sale del mes de vencimiento
+      var nr=Object.assign({},r); delete nr.id; nr.pg=monto; nr.fp=fecha; nr.cd=0; nr.ad=1;
+      await window.promesasGuardar(mesPago,id,nr);
+      await window.promesasGuardar(_pm.mes,id,{x:true});
+    } else {
+      await window.promesasGuardar(_pm.mes,id,{pg:monto,fp:fecha,cd:0});
+    }
+    _pmTramite(r.d,'Pago recibido','Pago registrado de '+_fm(monto)+' el '+fmtDMA(fecha)+(r.pl?' ('+r.pl+')':'')+(monto<(r.m||0)-0.5?' – pago parcial (prometido '+_fm(r.m)+')':'')+(adel?' – cobro adelantado (vencía el '+fmtDMA(r.f)+')':''),r.tel);
+    cerrarModal('modalPmPago'); _toast(adel?'Cobro adelantado: se registró en '+_pmMesNombre(mesPago):'Pago registrado');
+    if(completo) _pmSugerirSiguiente(r);
   }catch(err){ alert('No se pudo guardar: '+(err.message||err)); }
 }
 async function pmCaida(id){
@@ -6040,6 +6116,24 @@ async function pmEliminar(id){
   var r=_pmFila(id); if(!r) return;
   if(!confirm('¿Eliminar la promesa de '+(r.n||'')+'?')) return;
   try{ await window.promesasGuardar(_pm.mes,id,{x:true}); }catch(err){ alert('No se pudo eliminar: '+(err.message||err)); }
+}
+// Propone la promesa de la cuota siguiente (vencimiento un mes despues del original) y pide confirmar
+function _pmSumarMes(iso){
+  var p=String(iso||'').split('-'); if(p.length<3) return '';
+  var y=+p[0], m=+p[1]+1, d=+p[2]; if(m>12){ m=1; y++; }
+  var ult=new Date(y,m,0).getDate(); if(d>ult) d=ult;
+  return y+'-'+('0'+m).slice(-2)+'-'+('0'+d).slice(-2);
+}
+function _pmSugerirSiguiente(r){
+  var m=/CUOTA\s+(\d+)\s+DE\s+(\d+)/i.exec(r.pl||''); if(!m) return;
+  var k=+m[1], n=+m[2]; if(k>=n) return;
+  var plan='CUOTA '+(k+1)+' DE '+n+((k+1)===n?' (ULTIMA)':''), f=_pmSumarMes(r.f); if(!f) return;
+  setTimeout(function(){
+    _pmCampos({d:r.d,n:r.n,tel:r.tel,fi:r.fi,m:r.m,mo:r.mo,pu:'',f:f,pl:plan,lu:r.lu,tp:r.tp,ng:r.ng,mes:'',id:''});
+    document.getElementById('pm-tit').textContent='Pr\u00f3xima cuota: confirm\u00e1 la nueva promesa';
+    document.getElementById('pm-reg').checked=true;
+    document.getElementById('modalPm').classList.add('open');
+  },250);
 }
 // ----- Recordatorio por WhatsApp -----
 function pmRecordar(id){
