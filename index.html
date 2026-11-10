@@ -1090,7 +1090,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.2</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.4</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -5838,7 +5838,7 @@ function renderPromesas(){
       '<div style="flex:1"></div>'+
       '<button class="btn btn-outline btn-sm" onclick="pmVista(\''+(_pm.vista==='mes'?'hist':'mes')+'\')">'+(_pm.vista==='mes'?'&#128202; Ver histórico':'&#8592; Volver al mes')+'</button>'+
       '<button class="btn btn-dark btn-sm" onclick="pmNueva(false)">+ Nueva promesa</button>'+
-      (adm?'<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'pm-file\').click()">&#128229; Importar Excel</button><input type="file" id="pm-file" accept=".xlsx,.xls" style="display:none" onchange="pmImportarLeer(event)">':'')+
+      (adm?'<button class="btn btn-outline btn-sm" onclick="document.getElementById(\'pm-file\').click()">&#128229; Importar Excel</button><input type="file" id="pm-file" accept=".xlsx,.xls" style="display:none" multiple onchange="pmImportarLeer(event)">':'')+
     '</div><div id="pm-cuerpo"></div></div>';
   if(_pm.vista==='hist'){ pmRenderHist(); return; }
   pmEscuchar(); pmRenderCuerpo();
@@ -5903,7 +5903,7 @@ function pmRenderTabla(){
   var html='<div class="card" style="padding:0;overflow:auto"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Fecha</th><th>DNI</th><th>Nombre</th><th>Plan</th><th>Lugar</th><th>Financiera</th><th style="text-align:right">Monto</th><th style="text-align:right">Cobrado</th><th>Estado</th><th></th></tr></thead><tbody>';
   rows.slice(0,MAX).forEach(function(r){
     var e=_pmEstado(r), E=_PM_EST[e], id=_escU(r.id);
-    html+='<tr><td style="white-space:nowrap">'+(r.f?fmtDMA(r.f):'—')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.pl||'')+'</td><td>'+_escU(r.lu||'')+'</td><td>'+_escU(r.fi||'')+'</td>'+
+    html+='<tr><td style="white-space:nowrap">'+(r.f?fmtDMA(r.f):'—')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.pl||'')+(r.cr?'<div style="font-size:10px;color:#888">Cr\u00e9dito '+_escU(r.cr)+'</div>':'')+'</td><td>'+_escU(r.lu||'')+'</td><td>'+_escU(r.fi||'')+'</td>'+
       '<td style="text-align:right">'+_fm(r.m||0)+'</td><td style="text-align:right">'+((r.pg||0)>0?_fm(r.pg):'')+'</td>'+
       '<td><span style="background:'+E[2]+';color:'+E[1]+';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+E[0]+'</span></td>'+
       '<td style="white-space:nowrap">'+
@@ -6079,16 +6079,16 @@ function _pmFechaISO(v){
   var d=(typeof parseFechaFlex==='function')?parseFechaFlex(s):null;
   return (d&&!isNaN(d))?(d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2)):'';
 }
-function _pmLeerLibro(wb){
+function _pmLeerLibro(wb,ngDef){
   var out={}, ignoradas=[];
   wb.SheetNames.forEach(function(nom){
     var mes=_pmMesDeHoja(nom); // si la hoja no se llama como un mes, cada promesa va al mes de su fecha
     var filas=XLSX.utils.sheet_to_json(wb.Sheets[nom],{header:1,raw:true,defval:''});
-    var esMonto=function(x){ return x.indexOf('MONTO A ABONAR')===0||x==='MONTO'||x==='IMPORTE'||x==='MONTO PROMETIDO'||x==='MONTO A PAGAR'; };
+    var esMonto=function(x){ return x.indexOf('MONTO A ABONAR')===0||x==='A ABONAR'||x==='MONTO'||x==='IMPORTE'||x==='MONTO PROMETIDO'||x==='MONTO A PAGAR'; };
     var hi=filas.findIndex(function(f){ var n=f.map(_pmNormH); return (n.indexOf('DNI')>=0||n.indexOf('DOCUMENTO')>=0||n.indexOf('NRO DOCUMENTO')>=0||n.indexOf('D N I')>=0) && n.some(function(x){ return x.indexOf('NOMBRE')===0||x==='APELLIDO Y NOMBRE'||x==='CLIENTE'; }) && n.some(esMonto) && n.some(function(x){ return x.indexOf('FECHA')===0; }); });
     if(hi<0){ ignoradas.push(nom); return; }
     var col={}; filas[hi].forEach(function(c,i){ var k=_pmNormH(c); if(k==='DOCUMENTO'||k==='NRO DOCUMENTO'||k==='D N I') k='DNI'; if(k&&col[k]===undefined) col[k]=i; });
-    var alias={'MONTO A ABONAR':['MONTO','IMPORTE','MONTO PROMETIDO','MONTO A PAGAR'],'NOMBRE':['APELLIDO Y NOMBRE','CLIENTE'],'FECHA':['FECHA PROMESA','FECHA DE PAGO','FECHA PROMETIDA'],'FINANCIERA':['ENTIDAD'],'U DE NEGOCIO':['NEGOCIO','UNIDAD DE NEGOCIO'],'TELEFONO':['TEL','CELULAR']};
+    var alias={'MONTO A ABONAR':['A ABONAR','MONTO','IMPORTE','MONTO PROMETIDO','MONTO A PAGAR'],'NOMBRE':['APELLIDO Y NOMBRE','CLIENTE'],'FECHA':['FECHA PROMESA','FECHA DE PAGO','FECHA PROMETIDA'],'FINANCIERA':['ENTIDAD'],'U DE NEGOCIO':['NEGOCIO','UNIDAD DE NEGOCIO'],'TELEFONO':['TEL','CELULAR']};
     var G=function(f,k){
       var ks=[k].concat(alias[k]||[]);
       for(var q=0;q<ks.length;q++){ if(col[ks[q]]!==undefined) return f[col[ks[q]]]; }
@@ -6099,10 +6099,12 @@ function _pmLeerLibro(wb){
     for(var i=hi+1;i<filas.length;i++){
       var f=filas[i], dni=String(G(f,'DNI')).replace(/\D/g,'');
       if(!dni) break;
-      var fecha=_pmFechaISO(G(f,'FECHA')), monto=_pmNum(G(f,'MONTO A ABONAR'));
+      var fecha=_pmFechaISO(G(f,'FECHA')), monto=_pmNum(G(f,'MONTO ORIG'))||_pmNum(G(f,'MONTO A ABONAR'));
       if(!fecha||!(monto>0)) continue;
-      var r={d:dni,n:String(G(f,'NOMBRE')).trim(),m:monto,f:fecha,ng:String(G(f,'U DE NEGOCIO')).trim(),tp:String(G(f,'RES')).trim(),pl:String(G(f,'PLAN')).trim().toUpperCase(),lu:String(G(f,'LUGAR')).trim(),tel:String(G(f,'TELEFONO')).replace(/\.0$/,'').trim(),fi:String(G(f,'FINANCIERA')).trim(),u:'importado',t:Date.now()};
+      var r={d:dni,n:String(G(f,'NOMBRE')).trim(),m:monto,f:fecha,ng:String(G(f,'U DE NEGOCIO')).trim()||ngDef||'',tp:String(G(f,'RES')).trim(),pl:String(G(f,'PLAN')).trim().toUpperCase(),lu:String(G(f,'LUGAR')).trim(),tel:String(G(f,'TELEFONO')).replace(/\.0$/,'').trim(),fi:String(G(f,'FINANCIERA')).trim(),u:'importado',t:Date.now()};
       var mo=_pmNum(G(f,'MONTO ORIG')), pu=_pmNum(G(f,'PUNIT')), pg=_pmNum(G(f,'PAGO')), cd=_pmNum(G(f,'CAIDO'));
+      var cred=String(G(f,'CREDITO S')||G(f,'CREDITO')).replace(/\.0$/,'').trim(), fpg=_pmFechaISO(G(f,'PAGO EFECTUADO'));
+      if(cred) r.cr=cred; if(fpg) r.fp=fpg;
       if(mo) r.mo=mo; if(pu) r.pu=pu; if(pg>0){ r.pg=pg; } if(cd>0&&!(pg>0)) r.cd=cd;
       var mk=mes||fecha.slice(0,7);
       (out[mk]||(out[mk]={}))[_pmId(r)]=r;
@@ -6112,19 +6114,29 @@ function _pmLeerLibro(wb){
   return {meses:out,ignoradas:ignoradas};
 }
 async function pmImportarLeer(e){
-  var f=e.target.files[0]; e.target.value=''; if(!f||!window.soloAdmin()) return;
+  var fs=Array.prototype.slice.call(e.target.files||[]); e.target.value=''; if(!fs.length||!window.soloAdmin()) return;
   if(typeof XLSX==='undefined'){ alert('No se pudo cargar el lector de Excel. Recargá la página.'); return; }
   try{
-    _toast('Leyendo '+f.name+'…');
-    var bytes=await _archLeerArchivo(f), wb=XLSX.read(bytes,{type:'array'});
-    var R=_pmLeerLibro(wb), meses=Object.keys(R.meses).sort();
+    var R={meses:{},ignoradas:[]}, wb=null, fallidos=[];
+    for(var q=0;q<fs.length;q++){
+      var f=fs[q];
+      _toast('Leyendo '+f.name+'…');
+      var ngDef=f.name.replace(/\.[^.]+$/,'').replace(/^SEGUIMIENTO[_ -]*/i,'').replace(/[_]+/g,' ').trim(); if(/\d/.test(ngDef)) ngDef='';
+      var bytes=await _archLeerArchivo(f), w=XLSX.read(bytes,{type:'array'}), Rx=_pmLeerLibro(w,ngDef);
+      if(!wb) wb=w;
+      if(!Object.keys(Rx.meses).length) fallidos.push(f.name);
+      Object.keys(Rx.meses).forEach(function(m){ R.meses[m]=Object.assign(R.meses[m]||{},Rx.meses[m]); });
+      Rx.ignoradas.forEach(function(n){ R.ignoradas.push((fs.length>1?f.name+' > ':'')+n); });
+    }
+    if(fallidos.length) R.ignoradas.push('(archivos sin datos reconocibles: '+fallidos.join(', ')+')');
+    var meses=Object.keys(R.meses).sort();
     if(!meses.length){
       var det=wb.SheetNames.slice(0,6).map(function(n){ var fl=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''}).slice(0,12).filter(function(f){ return f.some(function(x){return String(x).trim();}); })[0]||[]; return '\u2022 '+n+': '+fl.filter(function(x){return String(x).trim();}).slice(0,10).join(' | '); }).join('\n');
       alert('No encontré una fila de títulos con DNI, NOMBRE, MONTO (A ABONAR) y FECHA en ninguna hoja.\n\nHojas del archivo y su primera fila:\n'+det+'\n\nMandame esto y lo ajusto.'); return; }
     _pmImp=R;
     var tot=0, totM=0, filas=meses.map(function(m){ var l=Object.keys(R.meses[m]).map(function(k){return R.meses[m][k];}); var s=l.reduce(function(a,x){return a+x.m;},0), c=l.reduce(function(a,x){return a+(x.pg||0);},0); tot+=l.length; totM+=s;
       return '<tr><td>'+_pmMesNombre(m)+'</td><td style="text-align:right">'+l.length+'</td><td style="text-align:right">'+_fm(s)+'</td><td style="text-align:right">'+_fm(c)+'</td></tr>'; }).join('');
-    document.getElementById('pmi-cuerpo').innerHTML='<div style="margin-bottom:8px">Archivo: <strong>'+_escU(f.name)+'</strong>. Se van a importar <strong>'+tot+'</strong> promesas de <strong>'+meses.length+'</strong> meses.</div>'+
+    document.getElementById('pmi-cuerpo').innerHTML='<div style="margin-bottom:8px">Archivo'+(fs.length>1?'s':'')+': <strong>'+_escU(fs.map(function(x){return x.name;}).join(', '))+'</strong>. Se van a importar <strong>'+tot+'</strong> promesas de <strong>'+meses.length+'</strong> meses.</div>'+
       '<div style="max-height:260px;overflow:auto;border:1px solid #e1e6ef;border-radius:8px"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Mes</th><th style="text-align:right">Promesas</th><th style="text-align:right">Proyectado</th><th style="text-align:right">Cobrado</th></tr></thead><tbody>'+filas+'</tbody></table></div>'+
       '<div style="font-size:11px;color:#888;margin-top:8px">Si una promesa ya estaba cargada (mismo DNI, fecha, plan y monto), se actualiza con los datos del Excel; no se duplica. Hojas ignoradas: '+(R.ignoradas.length?_escU(R.ignoradas.join(', ')):'ninguna')+'.</div><div id="pmi-prog" style="font-size:12px;color:#2557a7;margin-top:6px"></div>';
     document.getElementById('pmi-ok').disabled=false;
