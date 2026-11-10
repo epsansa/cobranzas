@@ -1090,7 +1090,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.1</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.2</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -6085,9 +6085,9 @@ function _pmLeerLibro(wb){
     var mes=_pmMesDeHoja(nom); // si la hoja no se llama como un mes, cada promesa va al mes de su fecha
     var filas=XLSX.utils.sheet_to_json(wb.Sheets[nom],{header:1,raw:true,defval:''});
     var esMonto=function(x){ return x.indexOf('MONTO A ABONAR')===0||x==='MONTO'||x==='IMPORTE'||x==='MONTO PROMETIDO'||x==='MONTO A PAGAR'; };
-    var hi=filas.findIndex(function(f){ var n=f.map(_pmNormH); return n.indexOf('DNI')>=0 && n.some(function(x){ return x.indexOf('NOMBRE')===0||x==='APELLIDO Y NOMBRE'||x==='CLIENTE'; }) && n.some(esMonto) && n.some(function(x){ return x.indexOf('FECHA')===0; }); });
+    var hi=filas.findIndex(function(f){ var n=f.map(_pmNormH); return (n.indexOf('DNI')>=0||n.indexOf('DOCUMENTO')>=0||n.indexOf('NRO DOCUMENTO')>=0||n.indexOf('D N I')>=0) && n.some(function(x){ return x.indexOf('NOMBRE')===0||x==='APELLIDO Y NOMBRE'||x==='CLIENTE'; }) && n.some(esMonto) && n.some(function(x){ return x.indexOf('FECHA')===0; }); });
     if(hi<0){ ignoradas.push(nom); return; }
-    var col={}; filas[hi].forEach(function(c,i){ var k=_pmNormH(c); if(k&&col[k]===undefined) col[k]=i; });
+    var col={}; filas[hi].forEach(function(c,i){ var k=_pmNormH(c); if(k==='DOCUMENTO'||k==='NRO DOCUMENTO'||k==='D N I') k='DNI'; if(k&&col[k]===undefined) col[k]=i; });
     var alias={'MONTO A ABONAR':['MONTO','IMPORTE','MONTO PROMETIDO','MONTO A PAGAR'],'NOMBRE':['APELLIDO Y NOMBRE','CLIENTE'],'FECHA':['FECHA PROMESA','FECHA DE PAGO','FECHA PROMETIDA'],'FINANCIERA':['ENTIDAD'],'U DE NEGOCIO':['NEGOCIO','UNIDAD DE NEGOCIO'],'TELEFONO':['TEL','CELULAR']};
     var G=function(f,k){
       var ks=[k].concat(alias[k]||[]);
@@ -6118,7 +6118,9 @@ async function pmImportarLeer(e){
     _toast('Leyendo '+f.name+'…');
     var bytes=await _archLeerArchivo(f), wb=XLSX.read(bytes,{type:'array'});
     var R=_pmLeerLibro(wb), meses=Object.keys(R.meses).sort();
-    if(!meses.length){ alert('No encontré hojas de meses con el formato esperado (ENERO 25, FEBRERO 25… con columnas DNI, NOMBRE, MONTO A ABONAR, FECHA).'); return; }
+    if(!meses.length){
+      var det=wb.SheetNames.slice(0,6).map(function(n){ var fl=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''}).slice(0,12).filter(function(f){ return f.some(function(x){return String(x).trim();}); })[0]||[]; return '\u2022 '+n+': '+fl.filter(function(x){return String(x).trim();}).slice(0,10).join(' | '); }).join('\n');
+      alert('No encontré una fila de títulos con DNI, NOMBRE, MONTO (A ABONAR) y FECHA en ninguna hoja.\n\nHojas del archivo y su primera fila:\n'+det+'\n\nMandame esto y lo ajusto.'); return; }
     _pmImp=R;
     var tot=0, totM=0, filas=meses.map(function(m){ var l=Object.keys(R.meses[m]).map(function(k){return R.meses[m][k];}); var s=l.reduce(function(a,x){return a+x.m;},0), c=l.reduce(function(a,x){return a+(x.pg||0);},0); tot+=l.length; totM+=s;
       return '<tr><td>'+_pmMesNombre(m)+'</td><td style="text-align:right">'+l.length+'</td><td style="text-align:right">'+_fm(s)+'</td><td style="text-align:right">'+_fm(c)+'</td></tr>'; }).join('');
