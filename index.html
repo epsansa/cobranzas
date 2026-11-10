@@ -1090,7 +1090,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.26.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.27.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -2795,6 +2795,7 @@ function confirmarPago(){
   var ci=window._pagoCI;var pi=window._pagoPI;
   var idx=idxClienteActivo();
   var p=DB.clientes[idx].creditos[ci].plan[pi];
+  var _cancAntes=_creditosCancelados(DB.clientes[idx]);
 
   if(!p.pagosHistorial) p.pagosHistorial=[];
   // Migrar un pago único guardado con el esquema viejo (sin historial) como primer registro
@@ -2816,7 +2817,27 @@ function confirmarPago(){
   else { p.pagada=true;p.pagadaParcial=false;p.saldo=0;p.recargo=dif; }
 
   clienteActivo=DB.clientes[idx];
+  _verCancelacion(DB.clientes[idx],_cancAntes,fecha);
   saveDB(clienteActivo);cerrarModal('modalPago');setTabAdmin('cuenta');
+}
+// Creditos con plan cuyas cuotas estan todas pagadas (devuelve los indices)
+function _creditosCancelados(c){
+  var o=[];
+  (c.creditos||[]).forEach(function(cr,i){ var pl=cr.plan||[]; if(pl.length && pl.every(function(x){ return x.pagada; })) o.push(i); });
+  return o;
+}
+// Si este pago completo el plan de algun credito: tramite automatico y, si ya no queda deuda en ningun credito, estado Cancelado
+function _verCancelacion(c,antes,fecha){
+  var ahora=_creditosCancelados(c), nuevos=ahora.filter(function(i){ return antes.indexOf(i)<0; });
+  if(!nuevos.length) return;
+  var nombres=nuevos.map(function(i){ var cr=c.creditos[i]; return (cr.producto||'Cr\u00e9dito')+(cr.num?' N\u00b0 '+cr.num:'')+(cr.entidad?' ('+cr.entidad+')':''); });
+  var todos=(c.creditos||[]).every(function(cr){ var pl=cr.plan||[]; return !pl.length || pl.every(function(x){ return x.pagada; }); });
+  var now=new Date(), fh=fmtDMA(now)+' '+now.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+  var cargada=fecha?fmtDMA(fecha):fmtDMA(now);
+  if(!c.tramites) c.tramites=[];
+  c.tramites.push({tipo:'Otro',fechaHora:fh,nota:(nuevos.length>1?'Cr\u00e9ditos cancelados: ':'Cr\u00e9dito cancelado: ')+nombres.join('; ')+'. \u00daltima cuota cargada el '+cargada+'.',tel:null,estadoCambio:todos?'Cancelado':null,user:(window._fbUserEmail||'')});
+  if(todos) c.estado='Cancelado';
+  _toast(nuevos.length>1?'Cr\u00e9ditos cancelados':'Cr\u00e9dito cancelado');
 }
 
 // -- SUBDIARIO DE PAGOS --
@@ -6001,7 +6022,7 @@ async function pmPagoGuardar(){
   if(!(monto>0)){ alert('Cargá el monto cobrado.'); return; }
   try{
     await window.promesasGuardar(_pm.mes,id,{pg:monto,fp:fecha,cd:0});
-    _pmTramite(r.d,'Pago','Pago registrado de '+_fm(monto)+' el '+fmtDMA(fecha)+(r.pl?' ('+r.pl+')':'')+(monto<(r.m||0)-0.5?' – pago parcial (prometido '+_fm(r.m)+')':''),r.tel);
+    _pmTramite(r.d,'Pago recibido','Pago registrado de '+_fm(monto)+' el '+fmtDMA(fecha)+(r.pl?' ('+r.pl+')':'')+(monto<(r.m||0)-0.5?' – pago parcial (prometido '+_fm(r.m)+')':''),r.tel);
     cerrarModal('modalPmPago'); _toast('Pago registrado');
   }catch(err){ alert('No se pudo guardar: '+(err.message||err)); }
 }
