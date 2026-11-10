@@ -757,6 +757,8 @@ window.promesasGuardar = async function(mes, id, obj){
 window.promesasGuardarMuchas = async function(mes, mapa){
   await setDoc(doc(db_fs,'promesas',mes), { r: mapa }, { merge: true });
 };
+window.honorariosLeer = async function(){ const sn = await getDoc(doc(db_fs,'sistema','honorarios')); return sn.exists()?sn.data():null; };
+window.honorariosGuardar = async function(reglas){ await setDoc(doc(db_fs,'sistema','honorarios'),{reglas:reglas,ts:serverTimestamp()}); };
 window.promesasTodos = async function(){
   const sn = await getDocs(collection(db_fs,'promesas')), o = {};
   sn.forEach(function(d){ const r=d.data().r||{}; o[d.id]=Object.keys(r).map(function(k){ return Object.assign({id:k}, r[k]); }).filter(function(x){ return !x.x; }); });
@@ -1090,7 +1092,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.29.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.30.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1306,6 +1308,14 @@ body.rol-usuario .solo-admin{display:none!important}
   </div>
   <div style="font-size:11px;color:#888;margin-bottom:8px">Si cobraste menos que lo prometido, queda como pago parcial.</div>
   <div class="btn-row"><button class="btn btn-dark" onclick="pmPagoGuardar()">Guardar pago</button><button class="btn btn-outline" onclick="cerrarModal('modalPmPago')">Cancelar</button></div>
+</div></div>
+<div class="modal-overlay" id="modalHon"><div class="modal" style="max-width:560px">
+  <h3>Reglas de honorarios</h3>
+  <div style="font-size:12px;color:#666;margin-bottom:8px">Porcentaje sobre lo cobrado. Se aplica la regla cuya entidad coincida (la m&#225;s espec&#237;fica gana). Si completás la 2&#170; columna, el % de la 1&#170; se usa cuando la mora es <strong>mayor a 2 a&#241;os</strong> y el de la 2&#170; cuando es de 2 a&#241;os o menos.</div>
+  <div style="display:grid;grid-template-columns:1fr 80px 80px 28px;gap:6px;font-size:11px;color:#888;margin-bottom:4px"><div>Entidad</div><div>% (&gt;2 a&#241;os)</div><div>% (&#8804;2 a&#241;os)</div><div></div></div>
+  <div id="hon-lista" style="max-height:340px;overflow:auto"></div>
+  <div id="hon-msg" style="font-size:12px;color:#c0392b;min-height:16px"></div>
+  <div class="btn-row"><button class="btn btn-dark" onclick="honGuardar()">Guardar</button><button class="btn btn-outline" onclick="honAgregar()">+ Agregar</button><button class="btn btn-outline" onclick="honRestaurar()">Restaurar</button><button class="btn btn-outline" onclick="cerrarModal('modalHon')">Cerrar</button></div>
 </div></div>
 <div class="modal-overlay" id="modalPmImp"><div class="modal" style="max-width:640px">
   <h3>Importar seguimiento desde Excel</h3>
@@ -5844,6 +5854,7 @@ function renderPromesas(){
   if(_pm.vista==='hist'){ pmRenderHist(); return; }
   if(_pm.vista==='sub'){ pmRenderSub(); return; }
   pmEscuchar(); pmRenderCuerpo();
+  if(adm && !_hon.cargado) _pmHonCargar().then(function(){ if(typeof modActivo!=='undefined'&&modActivo==='promesas'){ if(_pm.vista==='mes') pmRenderCuerpo(); else if(_pm.vista==='sub'&&_pmSub.lista) pmSubPintar(); } });
 }
 function pmMesElegir(k){ _pm.mes=k; _pm.fEst=''; _pm.fFin=''; _pm.q=''; _pm.rows=[]; pmEscuchar(); pmRenderCuerpo(); }
 function pmMesMover(d){
@@ -5867,7 +5878,7 @@ function pmRenderCuerpo(){
     _pmKpi('Proyectado',_fm(R.proy),R.n+' promesa'+(R.n===1?'':'s'),'#1a3a6b','#eaf1fb')+
     _pmKpi('Cobrado',_fm(R.cobr),R.nCobr+' cobrada'+(R.nCobr===1?'':'s')+' · '+efect+'% de lo proyectado','#1a7a3d','#e3f4e8')+
     _pmKpi('Caído',_fm(R.caido),R.nCaido+' caída'+(R.nCaido===1?'':'s'),'#b3261e','#fde7e5')+
-    _pmKpi('Pendiente',_fm(R.pend),R.nPend+' por cobrar','#8a6100','#fff3d1')+'</div>';
+    _pmKpi('Pendiente',_fm(R.pend),R.nPend+' por cobrar','#8a6100','#fff3d1')+(adm?_pmKpi('Honorarios',_fm(_pmHonResumen(rows).hon),'sobre lo cobrado','#5b2a86','#f1e8fa'):'')+'</div>'+(adm?_pmHonBloque(rows):'');
   if(cnt.hoy||cnt.vencida){
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'+
       (cnt.hoy?'<button class="btn btn-outline btn-sm" style="border-color:#1d4ed8;color:#1d4ed8" onclick="pmFiltroEst(\'hoy\')">&#9200; Vencen hoy: '+cnt.hoy+'</button>':'')+
@@ -5922,6 +5933,79 @@ function pmRenderTabla(){
 }
 function _pmFila(id){ return (_pm.rows||[]).find(function(r){ return r.id===id; }); }
 
+// ----- Honorarios (administrador): % sobre lo cobrado segun entidad y antiguedad de la mora -----
+var _HON_DEF=[
+  {k:'DEPORT SHOW',p:30,q:25},
+  {k:'NEACRED',p:30,q:''},{k:'LINCRED',p:30,q:''},
+  {k:'SUMAS PREVENTA',p:50,q:''},{k:'SOFRAN CARDINAL PREVENTA',p:50,q:''},{k:'ECOCRED PREVENTA',p:50,q:''},{k:'PROYECTO PREVENTA',p:50,q:''},
+  {k:'SUMAX EPSAN',p:100,q:''},{k:'ONIX EPSAN',p:100,q:''},{k:'CONSUMAS EPSAN',p:100,q:''},{k:'ECOCRED EPSAN',p:100,q:''},{k:'PROYECTO EPSAN',p:100,q:''}
+];
+var _hon={reglas:null,cargado:false};
+function _pmD(s){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s||'')); if(m) return new Date(+m[1],+m[2]-1,+m[3]); return (typeof parseFechaFlex==='function')?parseFechaFlex(s):null; }
+function _pmHonor(r){
+  var reglas=_hon.reglas||_HON_DEF, c=_pmCliente(r.d), cr=null;
+  if(c){ var num=String(r.cr||'').replace(/\D/g,''); cr=(c.creditos||[]).filter(function(x){ return num && String(x.num||'').replace(/\D/g,'')===num; })[0]||(c.creditos||[])[0]||null; }
+  var txt=' '+_pmNormH([r.ng,r.fi,cr&&cr.entidad,cr&&cr.comercio,c&&c.entidad].join(' '))+' ', best=null;
+  reglas.forEach(function(g){ var k=_pmNormH(g.k); if(k && txt.indexOf(' '+k+' ')>=0 && (!best||k.length>best.kl)) best={g:g,kl:k.length}; });
+  if(!best) return {pct:0,monto:0,sin:true,regla:'',edad:''};
+  var g=best.g, pct=parseFloat(g.p)||0, edad='';
+  if(g.q!==''&&g.q!=null&&!isNaN(parseFloat(g.q))){
+    var md=cr&&cr.fecha?_pmD(cr.fecha):null, pd=_pmD(r.fp||r.f)||new Date();
+    if(md){ var lim=new Date(pd.getTime()); lim.setFullYear(lim.getFullYear()-2); if(md<=lim){ pct=parseFloat(g.p)||0; edad='mora mayor a 2 años'; } else { pct=parseFloat(g.q)||0; edad='mora de 2 años o menos'; } }
+    else { pct=parseFloat(g.q)||0; edad='sin fecha de mora (se tomó el menor)'; }
+  }
+  return {pct:pct,monto:(r.pg||0)*pct/100,sin:false,regla:g.k,edad:edad};
+}
+async function _pmHonCargar(){
+  if(_hon.cargado) return; _hon.cargado=true;
+  try{ var d=await window.honorariosLeer(); if(d&&d.reglas&&d.reglas.length) _hon.reglas=d.reglas; }catch(e){}
+  try{ if(!window._todosClientesCache && typeof window.obtenerTodosClientes==='function') await window.obtenerTodosClientes(); }catch(e){}
+}
+function _pmHonResumen(rows){
+  var T={cobr:0,hon:0,sin:0,sinMonto:0,porRegla:{}};
+  rows.forEach(function(r){
+    if(!((r.pg||0)>0)) return;
+    var H=_pmHonor(r); T.cobr+=r.pg;
+    if(H.sin){ T.sin++; T.sinMonto+=r.pg; return; }
+    T.hon+=H.monto; var X=T.porRegla[H.regla]||(T.porRegla[H.regla]={n:0,cobr:0,hon:0}); X.n++; X.cobr+=r.pg; X.hon+=H.monto;
+  });
+  return T;
+}
+function _pmHonBloque(rows){
+  var T=_pmHonResumen(rows); if(!T.cobr) return '';
+  var ks=Object.keys(T.porRegla).sort(function(a,b){ return T.porRegla[b].hon-T.porRegla[a].hon; });
+  return '<div class="card" style="margin-bottom:12px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div class="card-title" style="margin:0;flex:1">Honorarios sobre lo cobrado</div><button class="btn btn-outline btn-sm" onclick="honAbrir()">&#9881; Reglas</button></div>'+
+    '<table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Regla</th><th style="text-align:right">Cobros</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Honorarios</th></tr></thead><tbody>'+
+    ks.map(function(k){ var X=T.porRegla[k]; return '<tr><td>'+_escU(k)+'</td><td style="text-align:right">'+X.n+'</td><td style="text-align:right">'+_fm(X.cobr)+'</td><td style="text-align:right">'+_fm(X.hon)+'</td></tr>'; }).join('')+
+    (T.sin?'<tr style="color:#b45309"><td>Sin regla (no se calculó)</td><td style="text-align:right">'+T.sin+'</td><td style="text-align:right">'+_fm(T.sinMonto)+'</td><td style="text-align:right">—</td></tr>':'')+
+    '<tr style="font-weight:700;background:#f6f8fb"><td>Total</td><td></td><td style="text-align:right">'+_fm(T.cobr)+'</td><td style="text-align:right">'+_fm(T.hon)+'</td></tr></tbody></table>'+
+    (T.sin?'<div style="font-size:11px;color:#b45309;margin-top:6px">Hay cobros sin regla: la entidad no coincide con ninguna regla. Agregala en “Reglas”.</div>':'')+'</div>';
+}
+function honAbrir(){
+  if(!window.soloAdmin()) return;
+  var rs=(_hon.reglas||_HON_DEF).map(function(g){ return Object.assign({},g); });
+  document.getElementById('hon-lista').innerHTML=rs.map(_honFila).join('');
+  document.getElementById('hon-msg').textContent='';
+  document.getElementById('modalHon').classList.add('open');
+}
+function _honFila(g){
+  var st='padding:5px 7px;border:1px solid #ddd;border-radius:6px;font-size:12px';
+  return '<div class="hon-f" style="display:grid;grid-template-columns:1fr 80px 80px 28px;gap:6px;margin-bottom:5px"><input class="hon-k" value="'+_escU(g.k||'')+'" style="'+st+'" placeholder="Entidad (ej: NEACRED)"><input class="hon-p" type="number" min="0" max="100" value="'+(g.p===''||g.p==null?'':g.p)+'" style="'+st+'"><input class="hon-q" type="number" min="0" max="100" value="'+(g.q===''||g.q==null?'':g.q)+'" style="'+st+'" placeholder="igual"><button class="btn btn-red btn-sm" style="padding:2px 6px" onclick="this.parentNode.remove()">&#10005;</button></div>';
+}
+function honAgregar(){ document.getElementById('hon-lista').insertAdjacentHTML('beforeend',_honFila({k:'',p:'',q:''})); }
+function honRestaurar(){ if(!confirm('¿Volver a las reglas originales?')) return; document.getElementById('hon-lista').innerHTML=_HON_DEF.map(_honFila).join(''); }
+async function honGuardar(){
+  if(!window.soloAdmin()) return;
+  var rs=[]; document.querySelectorAll('#hon-lista .hon-f').forEach(function(f){
+    var k=f.querySelector('.hon-k').value.trim(), p=f.querySelector('.hon-p').value, q=f.querySelector('.hon-q').value;
+    if(k&&p!=='') rs.push({k:k.toUpperCase(),p:parseFloat(p),q:q===''?'':parseFloat(q)});
+  });
+  if(!rs.length){ document.getElementById('hon-msg').textContent='Cargá al menos una regla.'; return; }
+  try{ await window.honorariosGuardar(rs); _hon.reglas=rs; cerrarModal('modalHon'); _toast('Reglas guardadas');
+    if(_pm.vista==='mes') pmRenderCuerpo(); else if(_pm.vista==='sub') pmSubPintar(); }
+  catch(err){ document.getElementById('hon-msg').textContent='No se pudo guardar: '+(err.message||err); }
+}
+
 // ----- Subdiario de lo cobrado por seguimiento -----
 var _pmSub={mes:'',fin:'',tipo:'',lista:[]};
 function _pmTipoCobro(r){
@@ -5957,31 +6041,31 @@ function pmSubPintar(){
       if(!((r.pg||0)>0)) return;
       if(_pmSub.fin && (r.fi||'SIN FINANCIERA')!==_pmSub.fin) return;
       var t=_pmTipoCobro(r); if(_pmSub.tipo && t!==_pmSub.tipo) return;
-      lista.push(Object.assign({},r,{mes:m,tipo:t}));
+      lista.push(Object.assign({},r,{mes:m,tipo:t,hon:_pmHonor(r)}));
     });
   });
   lista.sort(function(a,b){ return String(a.fp||a.f||'').localeCompare(String(b.fp||b.f||'')) || String(a.n||'').localeCompare(String(b.n||'')); });
   _pmSub.lista=lista;
-  var T={n:0,orig:0,cobr:0,porTipo:{}};
-  lista.forEach(function(r){ T.n++; T.orig+=r.m||0; T.cobr+=r.pg||0; var X=T.porTipo[r.tipo]||(T.porTipo[r.tipo]={n:0,s:0}); X.n++; X.s+=r.pg||0; });
+  var T={n:0,orig:0,cobr:0,hon:0,porTipo:{}}, adm=window.esAdmin();
+  lista.forEach(function(r){ T.hon+=r.hon.monto; T.n++; T.orig+=r.m||0; T.cobr+=r.pg||0; var X=T.porTipo[r.tipo]||(T.porTipo[r.tipo]={n:0,s:0}); X.n++; X.s+=r.pg||0; });
   var cont=document.getElementById('ps-res'); if(!cont) return;
   if(!lista.length){ cont.innerHTML='<div class="card" style="color:#999;font-size:13px">No hay cobros con ese filtro.</div>'; return; }
   var col={'Cuota original':['#1a7a3d','#e3f4e8'],'Parcial':['#8a6100','#fff3d1'],'Con punitorios':['#1d4ed8','#dbeafe']};
   cont.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'+
     _pmKpi('Total cobrado',_fm(T.cobr),T.n+' cobro'+(T.n===1?'':'s'),'#1a7a3d','#e3f4e8')+
-    ['Cuota original','Parcial','Con punitorios'].map(function(t){ var X=T.porTipo[t]||{n:0,s:0}; return _pmKpi(t,_fm(X.s),X.n+' cobro'+(X.n===1?'':'s'),col[t][0],col[t][1]); }).join('')+'</div>'+
-    '<div class="card" style="padding:0;overflow:auto"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Fecha pago</th><th>DNI</th><th>Nombre</th><th>Crédito</th><th>Plan</th><th>Financiera</th><th style="text-align:right">Monto original</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Dif.</th><th>Tipo de cobro</th></tr></thead><tbody>'+
+    ['Cuota original','Parcial','Con punitorios'].map(function(t){ var X=T.porTipo[t]||{n:0,s:0}; return _pmKpi(t,_fm(X.s),X.n+' cobro'+(X.n===1?'':'s'),col[t][0],col[t][1]); }).join('')+(adm?_pmKpi('Honorarios',_fm(T.hon),'sobre lo cobrado','#5b2a86','#f1e8fa'):'')+'</div>'+
+    '<div class="card" style="padding:0;overflow:auto"><table class="tbl" style="width:100%;font-size:12px"><thead><tr><th>Fecha pago</th><th>DNI</th><th>Nombre</th><th>Crédito</th><th>Plan</th><th>Financiera</th><th style="text-align:right">Monto original</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Dif.</th><th>Tipo de cobro</th>'+(adm?'<th style="text-align:right">%</th><th style="text-align:right">Honorarios</th>':'')+'</tr></thead><tbody>'+
     lista.slice(0,1500).map(function(r){ var dif=(r.pg||0)-(r.m||0), c=col[r.tipo];
-      return '<tr><td style="white-space:nowrap">'+((r.fp||r.f)?fmtDMA(r.fp||r.f):'')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.cr||'')+'</td><td>'+_escU(r.pl||'')+'</td><td>'+_escU(r.fi||'')+'</td><td style="text-align:right">'+_fm(r.m||0)+'</td><td style="text-align:right">'+_fm(r.pg||0)+'</td><td style="text-align:right;color:'+(dif<-0.5?'#b3261e':(dif>0.5?'#1d4ed8':'#888'))+'">'+(Math.abs(dif)<0.5?'—':(dif>0?'+':'')+_fm(dif))+'</td><td><span style="background:'+c[1]+';color:'+c[0]+';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+r.tipo+'</span></td></tr>'; }).join('')+
-    '<tr style="font-weight:700;background:#f6f8fb"><td colspan="6">Total</td><td style="text-align:right">'+_fm(T.orig)+'</td><td style="text-align:right">'+_fm(T.cobr)+'</td><td></td><td></td></tr></tbody></table></div>'+
+      return '<tr><td style="white-space:nowrap">'+((r.fp||r.f)?fmtDMA(r.fp||r.f):'')+'</td><td>'+_escU(r.d||'')+'</td><td style="font-weight:600">'+_escU(r.n||'')+'</td><td>'+_escU(r.cr||'')+'</td><td>'+_escU(r.pl||'')+'</td><td>'+_escU(r.fi||'')+'</td><td style="text-align:right">'+_fm(r.m||0)+'</td><td style="text-align:right">'+_fm(r.pg||0)+'</td><td style="text-align:right;color:'+(dif<-0.5?'#b3261e':(dif>0.5?'#1d4ed8':'#888'))+'">'+(Math.abs(dif)<0.5?'—':(dif>0?'+':'')+_fm(dif))+'</td><td><span style="background:'+c[1]+';color:'+c[0]+';border-radius:10px;padding:2px 8px;font-size:11px;font-weight:600;white-space:nowrap">'+r.tipo+'</span></td>'+(adm?'<td style="text-align:right" title="'+_escU(r.hon.edad)+'">'+(r.hon.sin?'<span style="color:#b45309">sin regla</span>':r.hon.pct+'%')+'</td><td style="text-align:right">'+_fm(r.hon.monto)+'</td>':'')+'</tr>'; }).join('')+
+    '<tr style="font-weight:700;background:#f6f8fb"><td colspan="6">Total</td><td style="text-align:right">'+_fm(T.orig)+'</td><td style="text-align:right">'+_fm(T.cobr)+'</td><td></td><td></td>'+(adm?'<td></td><td style="text-align:right">'+_fm(T.hon)+'</td>':'')+'</tr></tbody></table></div>'+
     (lista.length>1500?'<div style="font-size:11px;color:#888;margin-top:6px">Se muestran 1500 de '+lista.length+'; el Excel trae todos.</div>':'')+
     '<div style="font-size:11px;color:#888;margin-top:6px">Cuota original: se cobró el monto original. Parcial: se cobró menos. Con punitorios: se cobró más que el monto original (punitorios o recargo).</div>';
 }
 function pmSubExcel(){
   if(typeof XLSX==='undefined'||!_pmSub.lista.length){ alert('No hay datos para exportar.'); return; }
-  var filas=[['Mes','Fecha pago','DNI','Nombre','Crédito','Plan','Financiera','Unidad de negocio','Monto original','Punitorios','Cobrado','Diferencia','Saldo','Tipo de cobro']];
+  var filas=[['Mes','Fecha pago','DNI','Nombre','Crédito','Plan','Financiera','Unidad de negocio','Monto original','Punitorios','Cobrado','Diferencia','Saldo','Tipo de cobro'].concat(window.esAdmin()?['Regla honorarios','% honorarios','Honorarios']:[])];
   _pmSub.lista.forEach(function(r){ var dif=(r.pg||0)-(r.m||0);
-    filas.push([_pmMesNombre(r.mes),(r.fp||r.f)?fmtDMA(r.fp||r.f):'',r.d||'',r.n||'',r.cr||'',r.pl||'',r.fi||'',r.ng||'',r.m||0,r.pu||0,r.pg||0,Math.round(dif*100)/100,r.tipo==='Parcial'?Math.round(-dif*100)/100:0,r.tipo]); });
+    filas.push([_pmMesNombre(r.mes),(r.fp||r.f)?fmtDMA(r.fp||r.f):'',r.d||'',r.n||'',r.cr||'',r.pl||'',r.fi||'',r.ng||'',r.m||0,r.pu||0,r.pg||0,Math.round(dif*100)/100,r.tipo==='Parcial'?Math.round(-dif*100)/100:0,r.tipo].concat(window.esAdmin()?[r.hon.sin?'SIN REGLA':r.hon.regla+(r.hon.edad?' ('+r.hon.edad+')':''),r.hon.pct,Math.round(r.hon.monto*100)/100]:[])); });
   var ws=XLSX.utils.aoa_to_sheet(filas); ws['!cols']=[{wch:16},{wch:11},{wch:11},{wch:30},{wch:12},{wch:22},{wch:18},{wch:16},{wch:14},{wch:12},{wch:14},{wch:12},{wch:12},{wch:16}];
   var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Subdiario cobrado');
   XLSX.writeFile(wb,'subdiario_promesas_'+(_pmSub.mes||'todos')+'.xlsx');
@@ -6265,7 +6349,7 @@ async function pmImportarConfirmar(){
  'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
  'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
  'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs',
- 'pmPago','pmPagoGuardar','pmCaida','pmEliminar','pmEditar','pmImportarLeer','pmImportarConfirmar','archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
+ 'honAbrir','honGuardar','honAgregar','honRestaurar','pmPago','pmPagoGuardar','pmCaida','pmEliminar','pmEditar','pmImportarLeer','pmImportarConfirmar','archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
 ].forEach(function(n){
   var f=window[n];
   if(typeof f!=='function') return;
