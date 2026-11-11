@@ -1092,15 +1092,13 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.30.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.31.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
   <div class="modnav" style="margin-left:12px">
     <div class="mb active" onclick="setMod('admin',this)">Administraci&#243;n</div>
     <div class="mb" onclick="setMod('consultas',this)">Consultas</div>
-    <div class="mb" onclick="setMod('promesas',this)">&#129309; Promesas</div>
-    <div class="mb" onclick="setMod('archivos',this)">&#128193; Archivos</div>
     <div class="mb solo-admin" onclick="setMod('herramientas',this)">Herramientas</div>
   </div>
   <div class="topnav-right">
@@ -1425,7 +1423,9 @@ var clienteActivo = null;
 var creditoActivoIdx = null;
 var editandoCliId = null;
 var editandoCredIdx = null;
-var modActivo = 'admin';
+var modActivo = 'admin', _consTab = '';
+function _modEs(x){ return modActivo===x || (modActivo==='consultas' && _consTab===x); }
+function _modTarget(){ return document.getElementById(modActivo==='consultas'?'consultaContent':'mainArea'); }
 var tabActiva = 'avanzada';
 
 // Variables ya declaradas arriba — no redeclarar
@@ -2016,7 +2016,7 @@ function renderCuenta(){
               '<div style="font-weight:'+(esAnticipo?'700':'400')+'">'+label+'</div>'+
               '<div>'+fmtDMA(p.vto)+'</div>'+
               '<div>$'+parseFloat(p.monto||0).toLocaleString('es-AR')+'</div>'+
-              '<div>'+estadoTxt+detallePagos+'</div>'+
+              '<div>'+estadoTxt+detallePagos+(function(){ var pc=_punCalc(p); return (pc.monto>0)?'<div style="font-size:10.5px;color:#a32d2d;margin-top:2px">Punitorios: $'+Math.round(pc.monto).toLocaleString('es-AR')+(pc.man?' (manual)':' ('+pc.dias+' d\u00edas)')+' <button class="btn btn-outline btn-sm solo-admin" style="padding:0 5px;font-size:10px" title="Modificar punitorios" onclick="cuotaEditarPun('+i+','+pi+')">&#9998;</button></div>':''; })()+'</div>'+
               '<div>'+
               (p.pagadaParcial?'<div style="font-size:10px;color:#854F0B;margin-bottom:2px">Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR')+'</div>':'')+ 
               '<button class="btn btn-sm solo-admin '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
@@ -2759,6 +2759,47 @@ function guardarPlan(){
   saveDB(clienteActivo);cerrarModal('modalPlan');setTabAdmin('cuenta');
 }
 
+// ===== Punitorios de cuotas vencidas: 1% diario del valor de la cuota desde el 3.er dia de atraso (modificable) =====
+var PUN_GRACIA=2, PUN_TASA=1;
+function _punDias(p,fecha){
+  if(!p||!p.vto) return 0;
+  var a=_pmD(p.vto), b=_pmD(fecha||_pmHoy()); if(!a||!b) return 0;
+  return Math.round((b.getTime()-a.getTime())/86400000);
+}
+// Devuelve {monto, dias, man}: monto manual si la cuota lo tiene; si no, el automatico
+function _punCalc(p,fecha){
+  if(!p||p.pagada||p.esAnticipo) return {monto:0,dias:0,man:false};
+  var dias=_punDias(p,fecha);
+  if(p.punMan!=null && p.punMan!=='' && !isNaN(parseFloat(p.punMan))) return {monto:parseFloat(p.punMan),dias:dias,man:true};
+  if(p.pagosHistorial && p.pagosHistorial.length) return {monto:0,dias:dias,man:false};
+  if(dias<=PUN_GRACIA) return {monto:0,dias:dias,man:false};
+  return {monto:Math.round((parseFloat(p.monto)||0)*PUN_TASA*(dias-PUN_GRACIA))/100,dias:dias,man:false};
+}
+function cuotaEditarPun(ci,pi){
+  if(!window.soloAdmin()) return;
+  var p=clienteActivo.creditos[ci].plan[pi], c=_punCalc(p);
+  var v=prompt('Punitorios de esta cuota ($).\nCalculado: '+_fm(c.monto)+' ('+c.dias+' días de atraso, 1% diario desde el 3.º día).\nDejalo vacío para volver al cálculo automático.',c.man?c.monto:'');
+  if(v===null) return;
+  var idx=idxClienteActivo(), q=DB.clientes[idx].creditos[ci].plan[pi];
+  v=String(v).trim().replace(',','.');
+  if(v==='') q.punMan=null; else if(isNaN(parseFloat(v))||parseFloat(v)<0){ alert('Monto inválido.'); return; } else q.punMan=parseFloat(v);
+  clienteActivo=DB.clientes[idx]; saveDB(clienteActivo); setTabAdmin('cuenta');
+}
+function pagoPunCambio(){
+  var cuota=clienteActivo.creditos[window._pagoCI].plan[window._pagoPI];
+  var base=cuota.pagadaParcial ? (cuota.saldo!=null ? cuota.saldo : (cuota.monto||0)) : (cuota.monto||0);
+  var pun=parseFloat(document.getElementById('pago-pun').value)||0;
+  window._pagoReferencia=base+pun;
+  document.getElementById('pago-monto').value=Math.round(base+pun);
+  document.getElementById('pago-original').textContent='$'+Math.round(base+pun).toLocaleString('es-AR');
+  calcDiferenciaPago();
+}
+function pagoFechaCambio(){
+  var cuota=clienteActivo.creditos[window._pagoCI].plan[window._pagoPI];
+  var f=document.getElementById('pago-fecha').value, c=_punCalc(cuota,f);
+  document.getElementById('pago-pun').value=c.monto||'';
+  pagoPunCambio();
+}
 function toggleCuota(ci,pi){
   var cuota=clienteActivo.creditos[ci].plan[pi];
   if(cuota.pagada){
@@ -2770,13 +2811,15 @@ function toggleCuota(ci,pi){
   // sea el primero o uno adicional que complete/reduzca el saldo pendiente.
   window._pagoCI=ci;window._pagoPI=pi;
   var pendiente = cuota.pagadaParcial ? (cuota.saldo!=null ? cuota.saldo : (cuota.monto||0)) : (cuota.monto||0);
-  window._pagoReferencia = pendiente;
-  document.getElementById('pago-monto').value=pendiente;
-  document.getElementById('pago-fecha').value=new Date().toISOString().slice(0,10);
+  document.getElementById('pago-fecha').value=_pmHoy();
+  var _pc=_punCalc(cuota,_pmHoy());
+  document.getElementById('pago-pun').value=_pc.monto||'';
+  window._pagoReferencia = pendiente+_pc.monto;
+  document.getElementById('pago-monto').value=Math.round(pendiente+_pc.monto);
   document.getElementById('pago-nota').value='';
   var lbl=document.getElementById('pago-original-label');
-  if(lbl) lbl.textContent = cuota.pagadaParcial ? 'Saldo pendiente:' : 'Cuota original:';
-  document.getElementById('pago-original').textContent='$'+Math.round(pendiente).toLocaleString('es-AR');
+  if(lbl) lbl.textContent = (cuota.pagadaParcial ? 'Saldo pendiente' : 'Cuota')+(_pc.monto?' + punitorios:':':');
+  document.getElementById('pago-original').textContent='$'+Math.round(pendiente+_pc.monto).toLocaleString('es-AR');
   document.getElementById('pago-diferencia').textContent='\u2014';
   document.getElementById('pago-diferencia').style.color='#555';
   document.getElementById('modalPago').classList.add('open');
@@ -2784,7 +2827,7 @@ function toggleCuota(ci,pi){
 function deshacerPagoCuota(ci,pi){
   var idx=idxClienteActivo();
   var p=DB.clientes[idx].creditos[ci].plan[pi];
-  p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;p.pagosHistorial=null;
+  p.pagada=false;p.pagadaParcial=false;p.montoPagado=null;p.saldo=null;p.fechaPago=null;p.notaPago=null;p.recargo=null;p.pagosHistorial=null;p.punCobrado=null;
   clienteActivo=DB.clientes[idx];
   saveDB(clienteActivo);setTabAdmin('cuenta');
 }
@@ -2812,10 +2855,11 @@ function confirmarPago(){
   if(p.pagosHistorial.length===0 && p.montoPagado){
     p.pagosHistorial.push({monto:p.montoPagado, fecha:p.fechaPago||fecha, nota:p.notaPago||''});
   }
-  p.pagosHistorial.push({monto:monto, fecha:fecha, nota:nota});
-
+  var pun=parseFloat(document.getElementById('pago-pun').value)||0;
+  p.pagosHistorial.push({monto:monto, fecha:fecha, nota:nota, pun:pun||undefined});
+  if(pun) p.punCobrado=(parseFloat(p.punCobrado)||0)+pun;
   var acumulado=p.pagosHistorial.reduce(function(s,x){return s+(parseFloat(x.monto)||0);},0);
-  var original=p.monto||0;
+  var original=(p.monto||0)+(parseFloat(p.punCobrado)||0);
   var dif=acumulado-original;
 
   p.montoPagado=acumulado; // total acumulado entre todos los pagos de esta cuota
@@ -3141,11 +3185,14 @@ function elimCartera(i){ DB.carteras.splice(i,1); saveDBConfig();renderConfigLis
 // CONSULTAS
 // ===================================================
 function renderConsultas(){
+  _consTab='';
   document.getElementById('mainArea').innerHTML=`
   <div class="tabbar" id="consultaTabbar">
     <div class="tb active" onclick="setTabConsulta('contacto',this)">&#128222; Último contacto</div>
     
     <div class="tb" onclick="setTabConsulta('comercios',this)">&#127981; Comercios</div>
+    <div class="tb" onclick="setTabConsulta('promesas',this)">&#129309; Promesas</div>
+    <div class="tb" onclick="setTabConsulta('archivos',this)">&#128193; Archivos</div>
     <div class="tb" onclick="abrirSubdiario()" title="Subdiario de pagos">&#128209; Subdiario</div>
   </div>
   <div class="tabcontent" id="consultaContent"></div>`;
@@ -3156,7 +3203,11 @@ function setTabConsulta(tab, el){
   var bar=document.getElementById('consultaTabbar');
   if(bar) bar.querySelectorAll('.tb').forEach(function(t){t.classList.remove('active');});
   if(el) el.classList.add('active');
+  _consTab=(tab==='promesas'||tab==='archivos')?tab:'';
+  if(tab!=='promesas' && window.promesasDetener) window.promesasDetener();
   if(tab==='contacto') renderConsultaContacto();
+  else if(tab==='promesas') renderPromesas();
+  else if(tab==='archivos') renderArchivos();
   else renderComerciosConsulta();
 }
 function renderConsultaPromesas(){
@@ -5400,7 +5451,7 @@ setInterval(presPintar,60000);
 var ARCH_MAX=8*1024*1024;
 function _archTam(b){ return b>=1048576?(b/1048576).toFixed(1)+' MB':Math.max(1,Math.round(b/1024))+' KB'; }
 function renderArchivos(){
-  var adm=window.esAdmin(), lista=window._archivos||[], el=document.getElementById('mainArea'); if(!el) return;
+  var adm=window.esAdmin(), lista=window._archivos||[], el=_modTarget(); if(!el) return;
   var err=window._archErr?'<div style="color:#c0392b;font-size:12px;margin-bottom:8px">No se pueden leer los archivos ('+_escU(window._archErr)+'). Revisá que las reglas de Firestore estén actualizadas (Herramientas &gt; Usuarios &gt; Copiar reglas).</div>':'';
   var filas=lista.map(function(a){
     var d=new Date(a.t||Date.now());
@@ -5421,7 +5472,7 @@ function renderArchivos(){
       '<div class="card" style="color:#999;font-size:13px">'+(adm?'Todavía no hay archivos. Subí un libro de Excel (.xlsx, .xls, .xlsm o .csv, hasta 8 MB).':'No hay archivos compartidos con vos.')+'</div>')+
     '<div style="font-size:11px;color:#888;margin-top:8px">Se pueden abrir y consultar acá mismo (solo lectura) o descargar. Para modificar uno: descargalo, editalo y usá "Reemplazar".'+(adm?' Los archivos nuevos quedan visibles solo para el administrador hasta que los compartas con el ojo.':'')+'</div></div>';
 }
-window.archRender=function(){ if(typeof modActivo!=='undefined' && modActivo==='archivos') renderArchivos(); };
+window.archRender=function(){ if(typeof modActivo!=='undefined' && _modEs('archivos')) renderArchivos(); };
 function _archLeerArchivo(f){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ res(new Uint8Array(r.result)); }; r.onerror=function(){ rej(new Error('No se pudo leer el archivo.')); }; r.readAsArrayBuffer(f); }); }
 function _archValidar(f){
   if(!/\.(xlsx|xls|xlsm|csv)$/i.test(f.name)){ alert('Solo se aceptan archivos de Excel (.xlsx, .xls, .xlsm) o .csv.'); return false; }
@@ -5830,11 +5881,11 @@ function pmEscuchar(){
   _pm.err='';
   window.promesasEscuchar(_pm.mes,function(rows,err){
     if(err){ _pm.err=err.code||err.message; _pm.rows=[]; } else { _pm.rows=rows; _pm.err=''; }
-    if(typeof modActivo!=='undefined' && modActivo==='promesas' && _pm.vista==='mes') pmRenderCuerpo();
+    if(typeof modActivo!=='undefined' && _modEs('promesas') && _pm.vista==='mes') pmRenderCuerpo();
   });
 }
 function renderPromesas(){
-  var el=document.getElementById('mainArea'); if(!el) return;
+  var el=_modTarget(); if(!el) return;
   if(!_pm.mes) _pm.mes=_pmHoy().slice(0,7);
   var adm=window.esAdmin();
   var opts=[], hoy=new Date(), y0=2025, mActual=hoy.getFullYear()*12+hoy.getMonth();
@@ -5854,7 +5905,7 @@ function renderPromesas(){
   if(_pm.vista==='hist'){ pmRenderHist(); return; }
   if(_pm.vista==='sub'){ pmRenderSub(); return; }
   pmEscuchar(); pmRenderCuerpo();
-  if(adm && !_hon.cargado) _pmHonCargar().then(function(){ if(typeof modActivo!=='undefined'&&modActivo==='promesas'){ if(_pm.vista==='mes') pmRenderCuerpo(); else if(_pm.vista==='sub'&&_pmSub.lista) pmSubPintar(); } });
+  if(adm && !_hon.cargado) _pmHonCargar().then(function(){ if(typeof modActivo!=='undefined'&&_modEs('promesas')){ if(_pm.vista==='mes') pmRenderCuerpo(); else if(_pm.vista==='sub'&&_pmSub.lista) pmSubPintar(); } });
 }
 function pmMesElegir(k){ _pm.mes=k; _pm.fEst=''; _pm.fFin=''; _pm.q=''; _pm.rows=[]; pmEscuchar(); pmRenderCuerpo(); }
 function pmMesMover(d){
@@ -6153,7 +6204,7 @@ async function pmGuardar(){
       if(typeof tabActiva!=='undefined' && tabActiva==='tramites' && clienteActivo) setTabAdmin('tramites');
     }
     cerrarModal('modalPm'); _toast('Promesa guardada');
-    if(mes!==_pm.mes && typeof modActivo!=='undefined' && modActivo==='promesas'){ _pm.mes=mes; renderPromesas(); }
+    if(mes!==_pm.mes && typeof modActivo!=='undefined' && _modEs('promesas')){ _pm.mes=mes; renderPromesas(); }
   }catch(err){ msg.textContent='No se pudo guardar: '+((err&&err.code==='permission-denied')?'faltan actualizar las reglas de Firestore.':(err.message||err)); }
 }
 // ----- Pagos / caidas / baja (administrador) -----
@@ -6349,7 +6400,7 @@ async function pmImportarConfirmar(){
  'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
  'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
  'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs',
- 'honAbrir','honGuardar','honAgregar','honRestaurar','pmPago','pmPagoGuardar','pmCaida','pmEliminar','pmEditar','pmImportarLeer','pmImportarConfirmar','archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
+ 'cuotaEditarPun','honAbrir','honGuardar','honAgregar','honRestaurar','pmPago','pmPagoGuardar','pmCaida','pmEliminar','pmEditar','pmImportarLeer','pmImportarConfirmar','archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
 ].forEach(function(n){
   var f=window[n];
   if(typeof f!=='function') return;
@@ -6390,11 +6441,14 @@ async function pmImportarConfirmar(){
     <div style="margin-top:5px">Diferencia: <strong id="pago-diferencia">—</strong></div>
   </div>
   <div style="display:grid;gap:10px;margin-bottom:14px">
+    <div class="fld" id="pago-pun-fld"><label>Punitorios ($) <span style="font-weight:400;color:#888">&#8212; 1% diario desde el 3.&#186; d&#237;a de atraso; pod&#233;s modificarlo</span></label>
+      <input type="number" id="pago-pun" min="0" oninput="pagoPunCambio()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none">
+    </div>
     <div class="fld"><label>Monto cobrado ($)</label>
       <input type="number" id="pago-monto" oninput="calcDiferenciaPago()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none">
     </div>
     <div class="fld"><label>Fecha de pago</label>
-      <input type="date" id="pago-fecha" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">
+      <input type="date" id="pago-fecha" onchange="pagoFechaCambio()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none">
     </div>
     <div class="fld"><label>Nota / Detalle</label>
       <textarea id="pago-nota" placeholder="Ej: Pago parcial, acuerdo telefónico..." style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:12px;outline:none;resize:vertical;min-height:60px;font-family:Arial"></textarea>
