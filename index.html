@@ -757,6 +757,7 @@ window.promesasGuardar = async function(mes, id, obj){
 window.promesasGuardarMuchas = async function(mes, mapa){
   await setDoc(doc(db_fs,'promesas',mes), { r: mapa }, { merge: true });
 };
+window.punGuardar = async function(cfg){ await setDoc(doc(db_fs,'sistema','punitorios'),{tasa:cfg.tasa,gracia:cfg.gracia,ts:serverTimestamp()}); };
 window.honorariosLeer = async function(){ const sn = await getDoc(doc(db_fs,'sistema','honorarios')); return sn.exists()?sn.data():null; };
 window.honorariosGuardar = async function(reglas){ await setDoc(doc(db_fs,'sistema','honorarios'),{reglas:reglas,ts:serverTimestamp()}); };
 window.promesasTodos = async function(){
@@ -788,6 +789,8 @@ onAuthStateChanged(auth, async function(user){
     window.archIniciar(rol);
     if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} }
     window._unsubPlant = onSnapshot(PLANT_REF, function(sn){ window._plantDoc = sn.exists()?sn.data():null; }, function(){});
+    if(window._unsubPun){ try{window._unsubPun();}catch(e){} }
+    window._unsubPun = onSnapshot(doc(db_fs,'sistema','punitorios'), function(sn){ window._punCfg = sn.exists()?sn.data():null; }, function(){});
     if(rol==='admin'){ setTimeout(function(){ if(typeof window.backupAutoIniciar==='function') window.backupAutoIniciar(); },15000); }
     // vigilar la lista de usuarios en vivo: si el administrador te quita, se cierra la sesión al instante
     if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} }
@@ -1092,7 +1095,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.31.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.32.0</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -1978,7 +1981,7 @@ function renderCuenta(){
       ${miembroDe?`<div style="margin-top:10px;font-size:12px;color:#1a4a8a;background:#eef4fb;border:1px solid #c5d8ee;border-radius:6px;padding:8px 10px">&#128279; Este cr\u00e9dito est\u00e1 incluido en el plan refinanciado cargado en el cr\u00e9dito <b>${(miembroDe.producto?miembroDe.producto+' ':'')+'N\u00b0 '+(miembroDe.num||'s/n')}</b>. Los pagos se registran all\u00ed.</div>`:''}
       ${plan.length?`
       <div style="margin-top:10px">
-        <div class="card-title" style="margin-bottom:6px">Plan de pagos activo</div>
+        <div class="card-title" style="margin-bottom:6px;display:flex;align-items:center;gap:8px">Plan de pagos activo <button class="btn btn-outline btn-sm solo-admin" style="padding:1px 7px;font-size:10px" title="Cambiar el % diario de punitorios y los d\u00edas de gracia" onclick="punConfig()">&#9881; Punitorios</button></div>
         ${(cr.planIncluye&&cr.planIncluye.length)?`<div style="font-size:11px;color:#1a4a8a;background:#eef4fb;border:1px solid #c5d8ee;border-radius:6px;padding:5px 8px;margin-bottom:6px">${cr.planIncluye.length>1?'Convenio que incluye los cr\u00e9ditos':'Incluye el cr\u00e9dito'}: <b>${cr.planIncluye.join(' \u00b7 ')}</b>${cr.planCapital&&cr.planIncluye.length>1?' \u00b7 capital incluido $'+Math.round(cr.planCapital).toLocaleString('es-AR'):''}${cr.planCreadoEl?' \u00b7 creado el '+cr.planCreadoEl:''}</div>`:''}
         <div class="cuota-row-tbl" style="font-weight:600;font-size:10px;color:#888;border-bottom:1px solid #ddd">
           <div>#</div><div>Vencimiento</div><div>Monto</div><div>Estado</div><div></div>
@@ -2016,7 +2019,7 @@ function renderCuenta(){
               '<div style="font-weight:'+(esAnticipo?'700':'400')+'">'+label+'</div>'+
               '<div>'+fmtDMA(p.vto)+'</div>'+
               '<div>$'+parseFloat(p.monto||0).toLocaleString('es-AR')+'</div>'+
-              '<div>'+estadoTxt+detallePagos+(function(){ var pc=_punCalc(p); return (pc.monto>0)?'<div style="font-size:10.5px;color:#a32d2d;margin-top:2px">Punitorios: $'+Math.round(pc.monto).toLocaleString('es-AR')+(pc.man?' (manual)':' ('+pc.dias+' d\u00edas)')+' <button class="btn btn-outline btn-sm solo-admin" style="padding:0 5px;font-size:10px" title="Modificar punitorios" onclick="cuotaEditarPun('+i+','+pi+')">&#9998;</button></div>':''; })()+'</div>'+
+              '<div>'+estadoTxt+detallePagos+(function(){ var pc=_punCalc(p); return (pc.monto>0)?'<div style="font-size:10.5px;color:#a32d2d;margin-top:2px">Punitorios: $'+Math.round(pc.monto).toLocaleString('es-AR')+(pc.man?' (manual)':' ('+pc.dias+' d\u00edas \u00b7 '+pc.tasa+'% diario'+(pc.base&&pc.base!==parseFloat(p.monto)?' sobre saldo':'')+')')+' <button class="btn btn-outline btn-sm solo-admin" style="padding:0 5px;font-size:10px" title="Modificar punitorios" onclick="cuotaEditarPun('+i+','+pi+')">&#9998;</button></div>':''; })()+'</div>'+
               '<div>'+
               (p.pagadaParcial?'<div style="font-size:10px;color:#854F0B;margin-bottom:2px">Saldo: $'+Math.round(p.saldo||0).toLocaleString('es-AR')+'</div>':'')+ 
               '<button class="btn btn-sm solo-admin '+(p.pagada?'btn-outline':p.pagadaParcial?'btn-red':'btn-green')+'" onclick="toggleCuota('+i+','+pi+')">'+(p.pagada?'Deshacer':p.pagadaParcial?'A cuenta':'Pagar')+'</button>'+
@@ -2760,27 +2763,47 @@ function guardarPlan(){
 }
 
 // ===== Punitorios de cuotas vencidas: 1% diario del valor de la cuota desde el 3.er dia de atraso (modificable) =====
-var PUN_GRACIA=2, PUN_TASA=1;
-function _punDias(p,fecha){
-  if(!p||!p.vto) return 0;
-  var a=_pmD(p.vto), b=_pmD(fecha||_pmHoy()); if(!a||!b) return 0;
+function _punCfg(){
+  var c=window._punCfg||{}, t=parseFloat(c.tasa), g=parseInt(c.gracia,10);
+  return {tasa:isNaN(t)?1:t, gracia:isNaN(g)?0:g};
+}
+function _punDiasEntre(desde,hasta){
+  var a=_pmD(desde), b=_pmD(hasta||_pmHoy()); if(!a||!b) return 0;
   return Math.round((b.getTime()-a.getTime())/86400000);
 }
-// Devuelve {monto, dias, man}: monto manual si la cuota lo tiene; si no, el automatico
+// Punitorios de una cuota: % diario (global o propio de la cuota) sobre la cuota, o sobre el saldo si hay pagos a cuenta.
+// Cuenta desde el dia 1 de atraso (mas los dias de gracia que se configuren). Con pagos a cuenta, cuenta desde el ultimo pago.
 function _punCalc(p,fecha){
-  if(!p||p.pagada||p.esAnticipo) return {monto:0,dias:0,man:false};
-  var dias=_punDias(p,fecha);
-  if(p.punMan!=null && p.punMan!=='' && !isNaN(parseFloat(p.punMan))) return {monto:parseFloat(p.punMan),dias:dias,man:true};
-  if(p.pagosHistorial && p.pagosHistorial.length) return {monto:0,dias:dias,man:false};
-  if(dias<=PUN_GRACIA) return {monto:0,dias:dias,man:false};
-  return {monto:Math.round((parseFloat(p.monto)||0)*PUN_TASA*(dias-PUN_GRACIA))/100,dias:dias,man:false};
+  if(!p||p.pagada||p.esAnticipo||!p.vto) return {monto:0,dias:0,man:false,tasa:0,base:0};
+  var cfg=_punCfg(), hayPago=!!(p.pagosHistorial&&p.pagosHistorial.length);
+  var base=(hayPago||p.pagadaParcial)?(parseFloat(p.saldo!=null?p.saldo:p.monto)||0):(parseFloat(p.monto)||0);
+  var desde=p.vto; if(hayPago && p.fechaPago && String(p.fechaPago)>String(p.vto)) desde=p.fechaPago;
+  var dias=_punDiasEntre(desde,fecha), diasVto=_punDiasEntre(p.vto,fecha);
+  var tasa=(p.punTasa!=null&&p.punTasa!==''&&!isNaN(parseFloat(p.punTasa)))?parseFloat(p.punTasa):cfg.tasa;
+  if(p.punMan!=null && p.punMan!=='' && !isNaN(parseFloat(p.punMan))) return {monto:parseFloat(p.punMan),dias:diasVto,man:true,tasa:tasa,base:base};
+  var gr=hayPago?0:cfg.gracia;
+  if(dias<=gr||base<=0) return {monto:0,dias:diasVto,man:false,tasa:tasa,base:base};
+  return {monto:Math.round(base*tasa*(dias-gr))/100,dias:diasVto,man:false,tasa:tasa,base:base};
+}
+function punConfig(){
+  if(!window.soloAdmin()) return;
+  var c=_punCfg();
+  var t=prompt('Porcentaje de punitorios por día de atraso (%).\nActual: '+c.tasa+'%',String(c.tasa)); if(t===null) return;
+  var g=prompt('Días de gracia antes de empezar a contar (0 = desde el día 1 de atraso).\nActual: '+c.gracia,String(c.gracia)); if(g===null) return;
+  t=parseFloat(String(t).replace(',','.')); g=parseInt(g,10);
+  if(isNaN(t)||t<0||isNaN(g)||g<0){ alert('Valores inválidos.'); return; }
+  window.punGuardar({tasa:t,gracia:g}).then(function(){ window._punCfg={tasa:t,gracia:g}; _toast('Punitorios: '+t+'% diario, '+g+' días de gracia'); if(clienteActivo) setTabAdmin('cuenta'); }).catch(function(e){ alert('No se pudo guardar: '+(e.message||e)); });
 }
 function cuotaEditarPun(ci,pi){
   if(!window.soloAdmin()) return;
-  var p=clienteActivo.creditos[ci].plan[pi], c=_punCalc(p);
-  var v=prompt('Punitorios de esta cuota ($).\nCalculado: '+_fm(c.monto)+' ('+c.dias+' días de atraso, 1% diario desde el 3.º día).\nDejalo vacío para volver al cálculo automático.',c.man?c.monto:'');
-  if(v===null) return;
+  var p=clienteActivo.creditos[ci].plan[pi], c=_punCalc(p), g=_punCfg();
+  var t=prompt('% diario de punitorios para ESTA cuota.\nGeneral: '+g.tasa+'%. Dejá vacío para usar el general.',(p.punTasa!=null&&p.punTasa!=='')?p.punTasa:''); if(t===null) return;
+  t=String(t).trim().replace(',','.');
+  if(t!==''&&(isNaN(parseFloat(t))||parseFloat(t)<0)){ alert('Porcentaje inválido.'); return; }
   var idx=idxClienteActivo(), q=DB.clientes[idx].creditos[ci].plan[pi];
+  q.punTasa=(t===''?null:parseFloat(t));
+  var c2=_punCalc(q);
+  var v=prompt('Monto FIJO de punitorios para esta cuota ($).\nCon el % indicado el cálculo da '+_fm(c2.monto)+' ('+c2.dias+' días de atraso sobre '+_fm(c2.base)+').\nDejá vacío para usar el cálculo automático.',q.punMan!=null?q.punMan:''); if(v===null) return;
   v=String(v).trim().replace(',','.');
   if(v==='') q.punMan=null; else if(isNaN(parseFloat(v))||parseFloat(v)<0){ alert('Monto inválido.'); return; } else q.punMan=parseFloat(v);
   clienteActivo=DB.clientes[idx]; saveDB(clienteActivo); setTabAdmin('cuenta');
@@ -2856,6 +2879,7 @@ function confirmarPago(){
     p.pagosHistorial.push({monto:p.montoPagado, fecha:p.fechaPago||fecha, nota:p.notaPago||''});
   }
   var pun=parseFloat(document.getElementById('pago-pun').value)||0;
+  if(pun) p.punMan=null;
   p.pagosHistorial.push({monto:monto, fecha:fecha, nota:nota, pun:pun||undefined});
   if(pun) p.punCobrado=(parseFloat(p.punCobrado)||0)+pun;
   var acumulado=p.pagosHistorial.reduce(function(s,x){return s+(parseFloat(x.monto)||0);},0);
@@ -4802,14 +4826,14 @@ var PLANT_DEFAULT={
   pago:{empresa:'EPSAN',alias:'',cbu:'',titular:'',banco:'',wsp:'',tel:''},
   plantillas:[
     {id:'p1',nombre:'Recordatorio de cuota a vencer',canal:'wsp',asunto:'',texto:'Hola {nombre}, te escribimos de {empresa}.\nTe recordamos que tu cuota {cuota_nro} de {producto} vence el {cuota_vto} por {cuota_monto}.\n\nPodés abonar por transferencia al alias *{alias}* (titular {titular_cuenta}). Cuando lo hagas, enviá el comprobante por este chat.\n\nGracias.\n{usuario} – {empresa}'},
-    {id:'p2',nombre:'Cuota vencida',canal:'wsp',asunto:'',texto:'Hola {nombre}, te contactamos de {empresa} por tu {producto} ({entidad}).\nRegistramos {cuotas_vencidas} cuota/s vencida/s. El saldo pendiente es {saldo_total}.\n\n¿Podés comunicarte para acordar una forma de pago? Estamos para ayudarte a regularizar tu situación.\n\n{usuario} – {empresa}'},
+    {id:'p2',nombre:'Cuota vencida',canal:'wsp',asunto:'',texto:'Hola {nombre}, te contactamos de {empresa} por tu {producto} ({entidad}).\nRegistramos {cuotas_vencidas} cuota/s vencida/s. El saldo pendiente es {saldo_total}.\nIncluye punitorios por {punitorios_total}.\n\n¿Podés comunicarte para acordar una forma de pago? Estamos para ayudarte a regularizar tu situación.\n\n{usuario} – {empresa}'},
     {id:'p3',nombre:'Propuesta de regularización',canal:'wsp',asunto:'',texto:'Hola {nombre}, te escribimos de {empresa}.\nTenemos una propuesta para regularizar tu deuda de {entidad} ({producto}). El saldo actual es {saldo_total} y podemos analizar un plan de pagos en cuotas según tu posibilidad.\n\n¿Cuándo podemos hablar?\n\n{usuario} – {empresa}'},
-    {id:'p4',nombre:'Datos para transferir',canal:'wsp',asunto:'',texto:'Hola {nombre_cargado}, te paso los datos para abonar:\n\n*Importe:* {cuota_monto}\n*Empresa:* {empresa}\n*Alias:* {alias}\n*CBU/CVU:* {cbu}\n*Titular:* {titular_cuenta}\n*Banco/billetera:* {banco}\n\nEn el concepto de la transferencia poné tu DNI y enviá el comprobante por este chat para registrar tu pago.\n\n{empresa}'},
+    {id:'p4',nombre:'Datos para transferir',canal:'wsp',asunto:'',texto:'Hola {nombre_cargado}, te paso los datos para abonar:\n\n*Importe:* {cuota_monto}\n*Incluye punitorios:* {cuota_punitorios}\n*Empresa:* {empresa}\n*Alias:* {alias}\n*CBU/CVU:* {cbu}\n*Titular:* {titular_cuenta}\n*Banco/billetera:* {banco}\n\nEn el concepto de la transferencia poné tu DNI y enviá el comprobante por este chat para registrar tu pago.\n\n{empresa}'},
     {id:'p5',nombre:'Pago recibido',canal:'wsp',asunto:'',texto:'Hola {nombre}, confirmamos la recepción de tu pago. ¡Muchas gracias!\nCualquier consulta, estamos a disposición.\n\n{usuario} – {empresa}'},
     {id:'p6',nombre:'Aviso de deuda (mail)',canal:'mail',asunto:'Aviso de deuda – {entidad}',texto:'Estimado/a {nombre}:\n\nNos comunicamos en nombre de {entidad} respecto del crédito {producto} N° {nro_credito}. Al día de la fecha registra un saldo pendiente de {saldo_total}.\n\nPara regularizar su situación puede comunicarse con nosotros o abonar mediante transferencia al alias {alias} (titular {titular_cuenta}), enviándonos luego el comprobante.\n\nSaludos cordiales,\n{usuario}\n{empresa}'}
   ]
 };
-var PLANT_VARS=['nombre','nombre_cargado','dni','entidad','cartera','producto','nro_credito','saldo_total','cuotas_vencidas','cuota_nro','cuota_monto','cuota_vto','alias','cbu','titular_cuenta','banco','wsp_empresa','empresa','usuario','hoy'];
+var PLANT_VARS=['nombre','nombre_cargado','dni','entidad','cartera','producto','nro_credito','saldo_total','cuotas_vencidas','cuota_nro','cuota_monto','cuota_punitorios','cuota_sin_punitorios','punitorios_total','cuota_vto','alias','cbu','titular_cuenta','banco','wsp_empresa','empresa','usuario','hoy'];
 // La plantilla "Datos para transferir" original (sin cambios del administrador) se actualiza sola al texto nuevo
 var _P4_VIEJO='Hola {nombre}, te paso los datos para abonar:\n\n*Importe:* {cuota_monto}\n*Alias:* {alias}\n*CBU/CVU:* {cbu}\n*Titular:* {titular_cuenta}\n*Banco/billetera:* {banco}\n\nEn el concepto de la transferencia pon\u00e9 tu DNI y envi\u00e1 el comprobante por este chat para registrar tu pago.\n\n{empresa}';
 function _plantMigrar(p){
@@ -4836,7 +4860,8 @@ function _cuotasPend(c){
       if(!p.esAnticipo) n++;
       if(p.pagada) return;
       var monto=p.pagadaParcial?(parseFloat(p.saldo)||0):(parseFloat(p.monto)||0);
-      out.push({i:i,pi:pi,cr:cr,p:p,label:p.esAnticipo?'Anticipo':'C'+n,monto:monto,vto:p.vto||''});
+      var pun=_punCalc(p).monto;
+      out.push({i:i,pi:pi,cr:cr,p:p,label:p.esAnticipo?'Anticipo':'C'+n,monto:monto,pun:pun,total:monto+pun,vto:p.vto||''});
     });
   });
   out.sort(function(a,b){ return String(a.vto)<String(b.vto)?-1:(String(a.vto)>String(b.vto)?1:0); });
@@ -4855,13 +4880,13 @@ function _entDeCuota(c,ref){
 function _msgVars(c,ref){
   var P=_pagoEnt(_entDeCuota(c,ref||_cuotasPend(c)[0])), pend=_cuotasPend(c), hoy=new Date().toISOString().slice(0,10);
   var venc=pend.filter(function(x){ return x.vto && x.vto<hoy; });
-  var saldo=pend.length?pend.reduce(function(s,x){ return s+x.monto; },0):(c.creditos||[]).reduce(function(s,x){ return s+(parseFloat(x.capital)||0); },0);
+  var saldo=pend.length?pend.reduce(function(s,x){ return s+x.total; },0):(c.creditos||[]).reduce(function(s,x){ return s+(parseFloat(x.capital)||0); },0);
   var cu=ref||pend[0]||null;
   var cr0=(cu&&cu.cr)||(c.creditos||[])[0]||{};
   return {
     nombre:_tituloNombre(c.nombre), nombre_cargado:String(c.nombre||'').trim(), dni:c.dni||'', entidad:cr0.entidad||c.entidad||'', cartera:cr0.cartera||c.cartera||'',
     producto:cr0.producto||'crédito', nro_credito:cr0.num||'', saldo_total:_fm(saldo), cuotas_vencidas:String(venc.length),
-    cuota_nro:cu?cu.label:'', cuota_monto:cu?_fm(cu.monto):'', cuota_vto:(cu&&cu.vto)?fmtDMA(cu.vto):'',
+    cuota_nro:cu?cu.label:'', cuota_monto:cu?_fm(cu.total):'', cuota_punitorios:(cu&&cu.pun>0)?_fm(cu.pun):'', cuota_sin_punitorios:cu?_fm(cu.monto):'', punitorios_total:(function(){ var s=pend.reduce(function(a,x){ return a+x.pun; },0); return s>0?_fm(s):''; })(), cuota_vto:(cu&&cu.vto)?fmtDMA(cu.vto):'',
     alias:P.alias||'', cbu:P.cbu||'', titular_cuenta:P.titular||'', banco:P.banco||'', empresa:P.empresa||'', wsp_empresa:P.wsp||'',
     usuario:window.nombreUsuario(window._fbUserEmail), hoy:fmtDMA(new Date())
   };
@@ -4889,7 +4914,7 @@ function abrirMensaje(){
   var pend=_cuotasPend(c);
   _msgLlenarPlant('');
   document.getElementById('msg-cuota').innerHTML='<option value="">Automática (próxima pendiente)</option>'+pend.map(function(x,k){
-    return '<option value="'+k+'">'+_escU(x.label+' · '+(x.vto?fmtDMA(x.vto):'s/f')+' · '+_fm(x.monto)+' · '+(x.cr.producto||'Crédito'))+'</option>';
+    return '<option value="'+k+'">'+_escU(x.label+' · '+(x.vto?fmtDMA(x.vto):'s/f')+' · '+_fm(x.total)+(x.pun>0?' (incl. punitorios)':'')+' · '+(x.cr.producto||'Crédito'))+'</option>';
   }).join('');
   document.getElementById('msg-reg').checked=true;
   msgCambio();
@@ -5105,8 +5130,8 @@ function abrirPagoCuota(i,pi){
   if(!P.alias){ alert(window.esAdmin()?'Primero cargá el alias y los datos de pago en Herramientas > Plantillas y pago.':'El administrador todavía no cargó los datos de pago.'); return; }
   var cr=c.creditos[i], p=cr.plan[pi], n=0; cr.plan.forEach(function(x,k){ if(!x.esAnticipo && k<=pi) n++; });
   var label=p.esAnticipo?'Anticipo':'Cuota C'+n;
-  var monto=p.pagadaParcial?(parseFloat(p.saldo)||0):(parseFloat(p.monto)||0);
-  _piD={nombre:String(c.nombre||'').trim(),dni:c.dni||'',concepto:(cr.producto||'Crédito')+' · '+label+(cr.num?' · N° '+cr.num:''),monto:monto,vto:p.vto||'',
+  var _pc=_punCalc(p), monto=(p.pagadaParcial?(parseFloat(p.saldo)||0):(parseFloat(p.monto)||0))+_pc.monto;
+  _piD={nombre:String(c.nombre||'').trim(),dni:c.dni||'',concepto:(cr.producto||'Crédito')+' · '+label+(cr.num?' · N° '+cr.num:'')+(_pc.monto>0?' (incl. punitorios '+_fm(_pc.monto)+')':''),monto:monto,vto:p.vto||'',
         alias:P.alias,cbu:P.cbu,titcuenta:P.titular,banco:P.banco,wsp:P.wsp,empresa:P.empresa};
   _piCuota={label:label,monto:monto,vto:p.vto};
   _piCanvas=_pagoDibujar(_piD);
@@ -6400,7 +6425,7 @@ async function pmImportarConfirmar(){
  'hacerBackup','restaurarBackup','importarArchivo','confirmarImport','confirmarReemplazar',
  'ejecutarLimpiezaDuplicados','aplicarImportTelTramites','procesarArchivoTelTramites',
  'ejecutarRenombradoCarteras','ejecutarCompletarFechasObs',
- 'cuotaEditarPun','honAbrir','honGuardar','honAgregar','honRestaurar','pmPago','pmPagoGuardar','pmCaida','pmEliminar','pmEditar','pmImportarLeer','pmImportarConfirmar','archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
+ 'punConfig','cuotaEditarPun','honAbrir','honGuardar','honAgregar','honRestaurar','pmPago','pmPagoGuardar','pmCaida','pmEliminar','pmEditar','pmImportarLeer','pmImportarConfirmar','archSubirUI','archReemplazar','archReemplazarUI','archCompartir','archRenombrar','archEliminar','tplGuardarPago','tplQuitarPagoEnt','tplGuardar','tplNueva','tplEliminar','tplRestaurar','backupElegirCarpeta','compEliminar'
 ].forEach(function(n){
   var f=window[n];
   if(typeof f!=='function') return;
@@ -6441,7 +6466,7 @@ async function pmImportarConfirmar(){
     <div style="margin-top:5px">Diferencia: <strong id="pago-diferencia">—</strong></div>
   </div>
   <div style="display:grid;gap:10px;margin-bottom:14px">
-    <div class="fld" id="pago-pun-fld"><label>Punitorios ($) <span style="font-weight:400;color:#888">&#8212; 1% diario desde el 3.&#186; d&#237;a de atraso; pod&#233;s modificarlo</span></label>
+    <div class="fld" id="pago-pun-fld"><label>Punitorios ($) <span style="font-weight:400;color:#888">&#8212; % diario sobre la cuota o el saldo; pod&#233;s modificarlo</span></label>
       <input type="number" id="pago-pun" min="0" oninput="pagoPunCambio()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none">
     </div>
     <div class="fld"><label>Monto cobrado ($)</label>
