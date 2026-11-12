@@ -1095,7 +1095,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.32.1</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.33.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -2808,6 +2808,7 @@ function cuotaEditarPun(ci,pi){
   if(v==='') q.punMan=null; else if(isNaN(parseFloat(v))||parseFloat(v)<0){ alert('Monto inválido.'); return; } else q.punMan=parseFloat(v);
   clienteActivo=DB.clientes[idx]; saveDB(clienteActivo); setTabAdmin('cuenta');
 }
+function punSinPago(){ document.getElementById('pago-pun').value=''; pagoPunCambio(); }
 function pagoPunCambio(){
   var cuota=clienteActivo.creditos[window._pagoCI].plan[window._pagoPI];
   var base=cuota.pagadaParcial ? (cuota.saldo!=null ? cuota.saldo : (cuota.monto||0)) : (cuota.monto||0);
@@ -2837,6 +2838,7 @@ function toggleCuota(ci,pi){
   document.getElementById('pago-fecha').value=_pmHoy();
   var _pc=_punCalc(cuota,_pmHoy());
   document.getElementById('pago-pun').value=_pc.monto||'';
+  window._pagoBase = pendiente; window._pagoPunOrig=_pc.monto;
   window._pagoReferencia = pendiente+_pc.monto;
   document.getElementById('pago-monto').value=Math.round(pendiente+_pc.monto);
   document.getElementById('pago-nota').value='';
@@ -2878,9 +2880,16 @@ function confirmarPago(){
   if(p.pagosHistorial.length===0 && p.montoPagado){
     p.pagosHistorial.push({monto:p.montoPagado, fecha:p.fechaPago||fecha, nota:p.notaPago||''});
   }
-  var pun=parseFloat(document.getElementById('pago-pun').value)||0;
-  if(pun) p.punMan=null;
-  p.pagosHistorial.push({monto:monto, fecha:fecha, nota:nota, pun:pun||undefined});
+  var pun=parseFloat(document.getElementById('pago-pun').value)||0, punCond=0, base0=window._pagoBase||0;
+  // Si cubre el valor original pero no los punitorios: se puede saldar la cuota y eliminar los punitorios
+  if(pun>0 && base0>0 && monto>=base0-0.5 && monto<base0+pun-0.5){
+    var pagado=Math.max(0,Math.round((monto-base0)*100)/100), resto=Math.round((pun-pagado)*100)/100;
+    if(!confirm('El monto cargado cubre el valor original ('+_fm(base0)+')'+(pagado>0?' y '+_fm(pagado)+' de punitorios':'')+', pero quedan '+_fm(resto)+' de punitorios sin cubrir.\n\n\u00bfSaldar la cuota y eliminar esos '+_fm(resto)+'?')) return;
+    punCond=resto; pun=pagado; document.getElementById('pago-pun').value=pagado||'';
+  } else if(!pun && window._pagoPunOrig>0){ punCond=window._pagoPunOrig; }
+  if(pun||punCond) p.punMan=null;
+  p.pagosHistorial.push({monto:monto, fecha:fecha, nota:nota, pun:pun||undefined, punCond:punCond||undefined});
+  if(punCond) p.punCondonado=(parseFloat(p.punCondonado)||0)+punCond;
   if(pun) p.punCobrado=(parseFloat(p.punCobrado)||0)+pun;
   var acumulado=p.pagosHistorial.reduce(function(s,x){return s+(parseFloat(x.monto)||0);},0);
   var original=(p.monto||0)+(parseFloat(p.punCobrado)||0);
@@ -6467,7 +6476,7 @@ async function pmImportarConfirmar(){
   </div>
   <div style="display:grid;gap:10px;margin-bottom:14px">
     <div class="fld" id="pago-pun-fld"><label>Punitorios ($) <span style="font-weight:400;color:#888">&#8212; % diario sobre la cuota o el saldo; pod&#233;s modificarlo</span></label>
-      <input type="number" id="pago-pun" min="0" oninput="pagoPunCambio()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none">
+      <div style="display:flex;gap:6px"><input type="number" id="pago-pun" min="0" oninput="pagoPunCambio()" style="flex:1;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none"><button type="button" class="btn btn-outline btn-sm" onclick="punSinPago()" title="Cobrar solo el monto original y eliminar los punitorios">Solo monto original</button></div>
     </div>
     <div class="fld"><label>Monto cobrado ($)</label>
       <input type="number" id="pago-monto" oninput="calcDiferenciaPago()" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none">
