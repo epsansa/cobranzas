@@ -790,7 +790,7 @@ onAuthStateChanged(auth, async function(user){
     if(window._unsubPlant){ try{window._unsubPlant();}catch(e){} }
     window._unsubPlant = onSnapshot(PLANT_REF, function(sn){ window._plantDoc = sn.exists()?sn.data():null; }, function(){});
     if(window._unsubPun){ try{window._unsubPun();}catch(e){} }
-    window._unsubPun = onSnapshot(doc(db_fs,'sistema','punitorios'), function(sn){ window._punCfg = sn.exists()?sn.data():null; }, function(){});
+    window._unsubPun = onSnapshot(doc(db_fs,'sistema','punitorios'), function(sn){ window._punDoc = sn.exists()?sn.data():null; }, function(){});
     if(rol==='admin'){ setTimeout(function(){ if(typeof window.backupAutoIniciar==='function') window.backupAutoIniciar(); },15000); }
     // vigilar la lista de usuarios en vivo: si el administrador te quita, se cierra la sesión al instante
     if(window._unsubUsr){ try{window._unsubUsr();}catch(e){} }
@@ -1095,7 +1095,7 @@ body.rol-usuario .solo-admin{display:none!important}
 <!-- APP PRINCIPAL -->
 <div id="app" style="display:none;flex-direction:column;height:100vh">
 <div class="topnav">
-  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.32.0</span></div>
+  <div class="logo">&#9878; Collector <span style="font-size:9px;font-weight:400;opacity:.6;margin-left:3px" title="Versión del sistema">v14.32.1</span></div>
   <div id="fb-status" style="font-size:11px;margin-left:8px;opacity:.9"><span style="color:#f5c97a">&#9203; Conectando...</span></div>
   <div id="fecha-hoy" style="font-size:11px;margin-left:8px;opacity:.85;white-space:nowrap" title="Fecha de hoy"></div>
   <script>(function(){function f(){var d=new Date(),el=document.getElementById('fecha-hoy');if(!el)return;var dias=['dom','lun','mar','mi\u00e9','jue','vie','s\u00e1b'];el.textContent='\u00b7 '+dias[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();}f();setInterval(f,60000);})();</script>
@@ -2764,7 +2764,7 @@ function guardarPlan(){
 
 // ===== Punitorios de cuotas vencidas: 1% diario del valor de la cuota desde el 3.er dia de atraso (modificable) =====
 function _punCfg(){
-  var c=window._punCfg||{}, t=parseFloat(c.tasa), g=parseInt(c.gracia,10);
+  var c=window._punDoc||{}, t=parseFloat(c.tasa), g=parseInt(c.gracia,10);
   return {tasa:isNaN(t)?1:t, gracia:isNaN(g)?0:g};
 }
 function _punDiasEntre(desde,hasta){
@@ -2792,7 +2792,7 @@ function punConfig(){
   var g=prompt('Días de gracia antes de empezar a contar (0 = desde el día 1 de atraso).\nActual: '+c.gracia,String(c.gracia)); if(g===null) return;
   t=parseFloat(String(t).replace(',','.')); g=parseInt(g,10);
   if(isNaN(t)||t<0||isNaN(g)||g<0){ alert('Valores inválidos.'); return; }
-  window.punGuardar({tasa:t,gracia:g}).then(function(){ window._punCfg={tasa:t,gracia:g}; _toast('Punitorios: '+t+'% diario, '+g+' días de gracia'); if(clienteActivo) setTabAdmin('cuenta'); }).catch(function(e){ alert('No se pudo guardar: '+(e.message||e)); });
+  window.punGuardar({tasa:t,gracia:g}).then(function(){ window._punDoc={tasa:t,gracia:g}; _toast('Punitorios: '+t+'% diario, '+g+' días de gracia'); if(clienteActivo) setTabAdmin('cuenta'); }).catch(function(e){ alert('No se pudo guardar: '+(e.message||e)); });
 }
 function cuotaEditarPun(ci,pi){
   if(!window.soloAdmin()) return;
